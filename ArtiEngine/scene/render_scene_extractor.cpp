@@ -22,7 +22,7 @@ glm::vec3 forwardOf(const glm::mat4& world) noexcept {
 } // namespace
 
 const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
-        ExtractTarget target) {
+        const rendering::Renderer& renderer, ExtractTarget target) {
     // ArtiChoco 的世界变换是惰性的，必须显式刷。
     scene.updateWorldTransforms();
 
@@ -68,23 +68,35 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         m_render_scene.lights.push_back(desc);
     }
 
-    for (const auto [entity, world, renderer]:
+    for (const auto [entity, world, mesh_renderer]:
             scene.view<scene::WorldTransformComponent, MeshRendererComponent>().each()) {
-        if (!renderer.visible || !renderer.mesh.isValid()) {
+        // 变量名不叫 renderer：那个名字被 rendering::Renderer 参数占了。
+        if (!mesh_renderer.visible || !mesh_renderer.mesh.isValid()) {
             continue;
         }
         rendering::DrawItem draw;
-        draw.mesh = renderer.mesh;
-        draw.submesh_index = renderer.submesh_index;
-        draw.material = renderer.material;
+        draw.mesh = mesh_renderer.mesh;
+        draw.submesh_index = mesh_renderer.submesh_index;
+        draw.material = mesh_renderer.material;
         draw.transform = world.world;
-        // world_bounds 暂时留空。填它需要网格的局部 AABB，而那存在 Renderer 的资源注册表里
-        // （GPUMesh::bounds），公开 API 现在拿不到 —— 要加个 Renderer::meshInfo() 之类的东西。
-        // 视锥剔除做之前必须先补上这个，否则剔除没有输入。
+        draw.world_bounds = worldBounds(renderer, mesh_renderer.mesh, world.world);
         m_render_scene.draws.push_back(draw);
     }
 
     return m_render_scene;
+}
+
+rendering::AABB RenderSceneExtractor::worldBounds(const rendering::Renderer& renderer,
+        rendering::MeshHandle mesh, const glm::mat4& world) {
+    // 网格上传之后包围盒就不变了，所以查一次缓存住 —— 否则每帧每 draw 都要问一次 Renderer。
+    auto cached = m_mesh_bounds.find(mesh);
+    if (cached == m_mesh_bounds.end()) {
+        const auto info = renderer.meshInfo(mesh);
+        // 查不到就记一个空盒子。这里不报警：句柄无效的 draw 会在 ArtiRenderer 的 resolveDraw
+        // 里被跳掉并记日志，重复报没有意义。
+        cached = m_mesh_bounds.emplace(mesh, info ? info->bounds : rendering::AABB{}).first;
+    }
+    return cached->second.transformed(world);
 }
 
 } // namespace arti::engine

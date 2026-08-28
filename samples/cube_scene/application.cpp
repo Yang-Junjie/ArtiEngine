@@ -9,7 +9,7 @@
 namespace arti::core {
 
 // 由 artichoco_core 的 entry_point.cpp 调用。
-// 用法: cube_scene [--headless] [--frames N]
+// 用法: cube_scene [--headless] [--frames N] [--editor]
 Application* createApplication(int argc, char** argv) {
     ApplicationCreateInfo info;
     info.name = "ArtiEngine Cube Scene";
@@ -19,10 +19,14 @@ Application* createApplication(int argc, char** argv) {
 
     bool headless = false;
     uint32_t frame_limit = 0;
+    // 开局就进编辑器模式：场景画进 Viewport 面板，backbuffer 归 UI。
+    bool editor = false;
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{ argv[index] };
         if (argument == "--headless") {
             headless = true;
+        } else if (argument == "--editor") {
+            editor = true;
         } else if (argument == "--frames" && (index + 1) < argc) {
             const std::string_view value{ argv[++index] };
             uint32_t parsed = 0;
@@ -38,7 +42,7 @@ Application* createApplication(int argc, char** argv) {
     }
 
     auto* app = new Application(info);
-    app->pushLayer(std::make_unique<sample::CubeSceneLayer>(!headless, frame_limit));
+    app->pushLayer(std::make_unique<sample::CubeSceneLayer>(!headless, frame_limit, editor));
     return app;
 }
 

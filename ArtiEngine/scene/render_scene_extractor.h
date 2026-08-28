@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include <unordered_map>
+
 namespace arti::scene {
 class Scene;
 } // namespace arti::scene
@@ -28,10 +30,14 @@ struct ExtractTarget {
 // extract 之前收尾，剔除想作为独立系统跑。
 class RenderSceneExtractor {
 public:
+    // renderer 只用来读网格的局部包围盒（Renderer::meshInfo）——
+    // 顶点数据上传后就不在 CPU 侧了，DrawItem::world_bounds 只能这么算出来。
+    //
     // 内部会先调 scene.updateWorldTransforms()：ArtiChoco 那个不是自动的，漏调就会画出
     // 「物体动了但画面差一帧」这种极难查的问题。放在这里而不是当前置条件写进注释，
     // 是因为不可能忘。
-    const rendering::RenderScene& extract(scene::Scene& scene, ExtractTarget target);
+    const rendering::RenderScene& extract(scene::Scene& scene, const rendering::Renderer& renderer,
+            ExtractTarget target);
 
     // 上一次 extract 的结果。
     const rendering::RenderScene& renderScene() const noexcept { return m_render_scene; }
@@ -41,8 +47,15 @@ public:
     bool hasCamera() const noexcept { return m_has_camera; }
 
 private:
+    // 网格局部包围盒变换到世界空间，结果进 DrawItem::world_bounds。查表结果会缓存。
+    rendering::AABB worldBounds(const rendering::Renderer& renderer, rendering::MeshHandle mesh,
+            const glm::mat4& world);
+
     // 每帧复用，不重新构造 —— draws / lights 的容量因此能留住。
     rendering::RenderScene m_render_scene;
+    // MeshHandle -> 局部包围盒。网格上传后包围盒就不变了，所以可以一直缓存，
+    // 省掉每帧每 draw 一次 meshInfo() 查表。
+    std::unordered_map<rendering::MeshHandle, rendering::AABB> m_mesh_bounds;
     bool m_has_camera{ false };
 };
 

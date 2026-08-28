@@ -7,6 +7,7 @@ target_include_directories(cube_scene PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(cube_scene
     PRIVATE
         ArtiEngine::Engine
+        ArtiEngine::ImGui
         ArtiChoco::Platform
         ArtiSDK::GLM
 )

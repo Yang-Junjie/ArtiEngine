@@ -5,11 +5,13 @@
 #include "artichoco/renderer/render_device.h"
 #include "artichoco/scene/entity.h"
 #include "artichoco/scene/scene.h"
+#include "imgui/imgui_host.h"
 
 #include <array>
 #include <cstddef>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <imgui.h>
 #include <span>
 #include <vector>
 
@@ -87,10 +89,11 @@ std::vector<std::byte> makeCheckerTexels(uint32_t size) {
 
 } // namespace
 
-CubeSceneLayer::CubeSceneLayer(bool enable_renderer, uint32_t frame_limit)
+CubeSceneLayer::CubeSceneLayer(bool enable_renderer, uint32_t frame_limit, bool editor_mode)
         : Layer("CubeSceneLayer"),
           m_enable_renderer(enable_renderer),
-          m_frame_limit(frame_limit) {}
+          m_frame_limit(frame_limit),
+          m_editor_mode(editor_mode) {}
 
 CubeSceneLayer::~CubeSceneLayer() = default;
 
@@ -108,9 +111,17 @@ void CubeSceneLayer::onAttach() {
     m_render_device = std::make_unique<renderer::RenderDevice>(app.getWindow(),
             std::move(surface_source), device_info);
 
-    m_renderer = std::make_unique<rendering::Renderer>(*m_render_device);
+    rendering::RendererCreateInfo renderer_info;
+    renderer_info.present =
+            m_editor_mode ? rendering::PresentMode::IntoUI : rendering::PresentMode::Direct;
+    m_renderer = std::make_unique<rendering::Renderer>(*m_render_device, renderer_info);
     m_scene = std::make_unique<scene::Scene>();
     createSceneEntities();
+
+    engine::ImGuiHostCreateInfo imgui_info;
+    // 帧数受限说明是自动化跑的，布局要可复现，别继承也别写 imgui.ini。
+    imgui_info.persist_layout = m_frame_limit == 0;
+    m_imgui = std::make_unique<engine::ImGuiHost>(app.getWindow(), *m_renderer, imgui_info);
 
     const auto output = m_renderer->outputInfo();
     app.getLogChannel().info("Engine ready, output {}x{} (available: {})", output.width,
@@ -176,9 +187,11 @@ void CubeSceneLayer::createSceneEntities() {
 }
 
 void CubeSceneLayer::onDetach() {
+    // waitIdle 要在销毁 ImGuiHost 之前：它的析构会销毁字体图集纹理，GPU 可能还在用。
     if (m_renderer) {
         m_renderer->waitIdle();
     }
+    m_imgui.reset();
     m_scene.reset();
     m_renderer.reset();
     m_render_device.reset();
@@ -189,7 +202,7 @@ void CubeSceneLayer::onUpdate(core::Timestep delta_time) {
     ++m_frame_index;
 
     // 改的是组件，不是 RenderScene —— 世界变换的传播和抽取都交给下面那条链。
-    if (m_scene) {
+    if (m_scene && m_rotate) {
         float phase = 0.0f;
         for (const auto id: m_spinning) {
             auto entity = m_scene->findEntity(id);
@@ -210,6 +223,70 @@ void CubeSceneLayer::onUpdate(core::Timestep delta_time) {
     }
 }
 
+void CubeSceneLayer::onImGuiRender() {
+    if (!m_imgui) {
+        return;
+    }
+
+    m_imgui->beginFrame();
+    // 停靠区要在其它窗口之前建。中央节点透传，所以 Direct 模式下场景直接从中间透上来。
+    m_imgui->dockSpaceOverViewport();
+    drawUI();
+    if (m_editor_mode) {
+        drawViewportPanel();
+    }
+    m_imgui->endFrame();
+}
+
+void CubeSceneLayer::drawUI() {
+    ImGui::SetNextWindowSize(ImVec2{ 320.0f, 0.0f }, ImGuiCond_FirstUseEver);
+    ImGui::Begin("ArtiEngine");
+
+    ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
+
+    ImGui::SeparatorText("Extract");
+    ImGui::Text("entities:   %zu", m_spinning.size());
+    ImGui::Text("draws:      %zu", m_extractor.renderScene().draws.size());
+    ImGui::Text("lights:     %zu", m_extractor.renderScene().lights.size());
+    ImGui::Text("draw calls: %u", m_last_statistics.draw_calls);
+    ImGui::Text("has camera: %s", m_extractor.hasCamera() ? "yes" : "no");
+
+    ImGui::SeparatorText("Present");
+    if (ImGui::Checkbox("Editor mode (scene into panel)", &m_editor_mode)) {
+        m_renderer->setPresentMode(
+                m_editor_mode ? rendering::PresentMode::IntoUI : rendering::PresentMode::Direct);
+        // 切回 Direct 时清掉请求尺寸，否则场景会一直按上次面板的大小渲染。
+        if (!m_editor_mode) {
+            m_scene_width = 0;
+            m_scene_height = 0;
+        }
+    }
+    ImGui::Checkbox("Rotate", &m_rotate);
+
+    ImGui::End();
+}
+
+void CubeSceneLayer::drawViewportPanel() {
+    // 必须给初始尺寸：Image 的大小取自 GetContentRegionAvail()，而窗口默认自适应内容 ——
+    // 两者互相取值会塌缩到最小尺寸。停靠之后尺寸由 dock node 决定，这个循环依赖就消失了。
+    ImGui::SetNextWindowSize(ImVec2{ 960.0f, 540.0f }, ImGuiCond_FirstUseEver);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{ 0.0f, 0.0f });
+    ImGui::Begin("Viewport");
+    ImGui::PopStyleVar();
+
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    m_scene_width = available.x > 0.0f ? static_cast<uint32_t>(available.x) : 0;
+    m_scene_height = available.y > 0.0f ? static_cast<uint32_t>(available.y) : 0;
+
+    if (m_scene_width != 0 && m_scene_height != 0) {
+        // SceneColor 是线性数据，ImGuiPass 认出这个 id 后会跳过 sRGB 解码。
+        ImGui::Image(m_renderer->sceneColorTextureId(),
+                ImVec2{ static_cast<float>(m_scene_width), static_cast<float>(m_scene_height) });
+    }
+
+    ImGui::End();
+}
+
 void CubeSceneLayer::onRender() {
     if (!m_renderer || !m_scene) {
         return;
@@ -220,17 +297,23 @@ void CubeSceneLayer::onRender() {
         return;
     }
 
-    // 目标尺寸从这里进去：extract 靠它算 aspect。编辑器模式下这里会换成 Viewport 面板的尺寸。
-    engine::ExtractTarget target;
-    target.width = output.width;
-    target.height = output.height;
+    // 目标尺寸从这里进去：extract 靠它算 aspect。编辑器模式下是 Viewport 面板的尺寸，
+    // 否则是窗口的 —— 这正是 aspect 不存在 CameraComponent 里的理由。
+    m_renderer->setSceneTargetSize(m_scene_width, m_scene_height);
 
-    const auto& render_scene = m_extractor.extract(*m_scene, target);
+    engine::ExtractTarget target;
+    const bool has_panel = m_scene_width != 0 && m_scene_height != 0;
+    target.width = has_panel ? m_scene_width : output.width;
+    target.height = has_panel ? m_scene_height : output.height;
+
+    const auto& render_scene = m_extractor.extract(*m_scene, *m_renderer, target);
     if (!m_extractor.hasCamera()) {
         return;
     }
 
-    const auto statistics = m_renderer->renderFrame(render_scene);
+    const auto statistics = m_renderer->renderFrame(render_scene,
+            m_imgui ? m_imgui->overlay() : rendering::FrameOverlay{});
+    m_last_statistics = statistics;
     if (m_frame_index == 1 && statistics.rendered) {
         core::Application::get().getLogChannel().info(
                 "First frame rendered ({} draw calls, {} lights)", statistics.draw_calls,
