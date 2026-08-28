@@ -1,0 +1,3 @@
+[submodule "ArtiRenderer"]
+	path = ArtiRenderer
+	url = https://github.com/Yang-Junjie/ArtiRenderer.git
