@@ -13,7 +13,6 @@ HierarchyPanel::HierarchyPanel(scene::Scene& scene)
 void HierarchyPanel::draw() {
     ImGui::Begin("Hierarchy");
 
-    // 右键空白区域创建实体
     if (ImGui::BeginPopupContextWindow(nullptr,
                 ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
         if (ImGui::MenuItem("Create Empty Entity")) {
@@ -24,13 +23,9 @@ void HierarchyPanel::draw() {
         ImGui::EndPopup();
     }
 
-    // 只画顶层实体（没有父节点的），子节点由 drawEntityNode 递归。
-    //
-    // 先收集再画：ImGui 的右键菜单里可能删实体，那会让 entt 的 view 在遍历中失效。
     m_visible_roots.clear();
     for (auto [entity_handle, id]: m_scene.view<scene::IDComponent>().each()) {
         auto entity = m_scene.findEntity(id.id);
-        // ParentComponent 是必备组件（每个实体都有），所以直接取；parent_id 无效就是顶层。
         if (!entity.getComponent<scene::ParentComponent>().parent_id.isValid()) {
             m_visible_roots.push_back(id.id);
         }
@@ -39,7 +34,6 @@ void HierarchyPanel::draw() {
         drawEntityNode(root);
     }
 
-    // 点击空白区域取消选中
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsWindowHovered() &&
             !ImGui::IsAnyItemHovered()) {
         m_selected_entity = std::nullopt;
@@ -47,7 +41,6 @@ void HierarchyPanel::draw() {
 
     ImGui::End();
 
-    // 树画完了才真的删 —— 在遍历中间销毁实体会让 entt 的 view 失效。
     if (m_pending_delete) {
         auto victim = m_scene.findEntity(*m_pending_delete);
         if (victim.isValid()) {
@@ -86,7 +79,6 @@ void HierarchyPanel::drawEntityNode(core::UUID entity) {
         m_selected_entity = entity;
     }
 
-    // 删除要等这一帧的树画完再执行 —— 在遍历里销毁实体会让 entt 的存储失效。
     bool delete_requested = false;
     if (ImGui::BeginPopupContextItem()) {
         if (ImGui::MenuItem("Create Child Entity")) {

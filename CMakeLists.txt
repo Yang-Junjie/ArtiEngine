@@ -22,6 +22,7 @@ foreach(_arti_required_submodule
     "${ARTIENGINE_ARTIRENDERER_DIR}/CMakeLists.txt"
     "${ARTIENGINE_ARTIRENDERER_DIR}/ArtiChoco/CMakeLists.txt"
     "${ARTIENGINE_ARTIRENDERER_DIR}/third_party/imgui/imgui.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ImGuizmo/src/ImGuizmo.cpp"
 )
     if(NOT EXISTS "${_arti_required_submodule}")
         message(FATAL_ERROR
@@ -39,6 +40,9 @@ include(ArtiVulkanSDK)
 set(ARTIRENDERER_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
 set(ARTIRENDERER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(ArtiRenderer)
+
+# third_party 在 ArtiRenderer 之后：ImGuizmo 要用 ArtiRenderer 里的 ImGui::Core（含私有头）。
+add_subdirectory(third_party)
 
 add_subdirectory(ArtiEngine)
 

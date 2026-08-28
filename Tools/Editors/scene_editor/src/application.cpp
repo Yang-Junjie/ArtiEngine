@@ -8,8 +8,6 @@
 
 namespace arti::core {
 
-// 由 artichoco_core 的 entry_point.cpp 调用（没有 entry_point.h，main 在那个 cpp 里）。
-// 用法: scene_editor [scene_path] [--frames N] [--auto-play] [--auto-pick]
 Application* createApplication(int argc, char** argv) {
     ApplicationCreateInfo info;
     info.name = "ArtiEngine Scene Editor";

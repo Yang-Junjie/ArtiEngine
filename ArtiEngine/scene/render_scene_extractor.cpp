@@ -13,7 +13,6 @@ namespace {
 glm::vec3 forwardOf(const glm::mat4& world) noexcept {
     const glm::vec3 forward{ -world[2] };
     const float length = glm::length(forward);
-    // 缩放为 0 的实体会给出零向量，归一化会得到 NaN。退化时给个确定的朝下方向。
     return length > 0.0f ? forward / length : glm::vec3{ 0.0f, -1.0f, 0.0f };
 }
 
@@ -22,7 +21,6 @@ glm::vec3 forwardOf(const glm::mat4& world) noexcept {
 const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         const rendering::Renderer& renderer, ExtractTarget target) {
     scene.updateWorldTransforms();
-
 
     m_render_scene.draws.clear();
     m_render_scene.lights.clear();
@@ -39,10 +37,7 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         }
 
         const auto aspect = static_cast<float>(target.width) / static_cast<float>(target.height);
-        // view 是世界变换的逆。用 affineInverse 而不是通用 inverse：变换是仿射的，
-        // 这样又快又稳。
         m_render_scene.view.view = glm::affineInverse(world.world);
-        // RH_ZO：深度范围 [0,1]，和 ArtiRenderer 的 pass 约定一致。
         m_render_scene.view.projection = glm::perspectiveRH_ZO(glm::radians(camera.fov_degrees),
                 aspect, camera.near_plane, camera.far_plane);
         m_render_scene.view.camera_position = glm::vec3{ world.world[3] };
@@ -66,7 +61,6 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
     for (const auto [entity, world, mesh_renderer, id]:
             scene.view<scene::WorldTransformComponent, MeshRendererComponent, scene::IDComponent>()
                     .each()) {
-        // 变量名不叫 renderer：那个名字被 rendering::Renderer 参数占了。
         if (!mesh_renderer.visible || !mesh_renderer.mesh.isValid()) {
             continue;
         }
@@ -76,8 +70,6 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         draw.material = mesh_renderer.material;
         draw.transform = world.world;
         draw.world_bounds = worldBounds(renderer, mesh_renderer.mesh, world.world);
-        // 用 UUID 而不是 entt 的 handle 发号：handle 在实体销毁后会被复用，UUID 不会，
-        // 而拾取的读回是跨帧的 —— 复用的 handle 会让结果指向一个不相干的新实体。
         draw.picking_id = pickingIdFor(id.id);
         m_render_scene.draws.push_back(draw);
     }
@@ -98,7 +90,6 @@ uint32_t RenderSceneExtractor::pickingIdFor(core::UUID entity) {
 }
 
 std::optional<core::UUID> RenderSceneExtractor::entityForPickingId(uint32_t picking_id) const {
-    // 0 是「空处」，不用查表。
     if (picking_id == 0) {
         return std::nullopt;
     }
