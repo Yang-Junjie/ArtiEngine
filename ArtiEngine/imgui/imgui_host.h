@@ -65,6 +65,14 @@ public:
     [[nodiscard]] bool wantsMouseInput() const noexcept;
     [[nodiscard]] bool wantsKeyboardInput() const noexcept;
 
+    // 是否有文本控件正在接收输入（InputText 之类）。
+    //
+    // 做相机的 WASD 门禁要用这个，**不要用 wantsKeyboardInput()**：后者在开了
+    // ImGuiConfigFlags_NavEnableKeyboard 之后，只要有窗口获得焦点就恒为 true
+    // （imgui.h 对 WantCaptureKeyboard 的注释：「or an imgui window is focused and
+    // navigation is enabled」），拿它当门禁会让键盘永远进不来。
+    [[nodiscard]] bool wantsTextInput() const noexcept;
+
 private:
     void createFontTexture();
 

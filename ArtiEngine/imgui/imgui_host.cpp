@@ -183,4 +183,9 @@ bool ImGuiHost::wantsKeyboardInput() const noexcept {
     return ImGui::GetIO().WantCaptureKeyboard;
 }
 
+bool ImGuiHost::wantsTextInput() const noexcept {
+    ImGui::SetCurrentContext(m_context);
+    return ImGui::GetIO().WantTextInput;
+}
+
 } // namespace arti::engine

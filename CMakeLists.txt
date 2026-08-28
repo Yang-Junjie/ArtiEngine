@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 3.25)
 
 project(ArtiEngine VERSION 0.1.0 LANGUAGES CXX)
 
-option(ARTIENGINE_BUILD_SAMPLES "Build ArtiEngine samples" ON)
-
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
@@ -44,6 +42,14 @@ add_subdirectory(ArtiRenderer)
 
 add_subdirectory(ArtiEngine)
 
-if(ARTIENGINE_BUILD_SAMPLES)
-    add_subdirectory(samples)
+option(ARTIENGINE_BUILD_TOOLS "Build ArtiEngine tools (editors, etc.)" ON)
+if(ARTIENGINE_BUILD_TOOLS)
+    add_subdirectory(Tools)
 endif()
+
+option(ARTIENGINE_BUILD_TESTS "Build ArtiEngine tests" ON)
+if(ARTIENGINE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+

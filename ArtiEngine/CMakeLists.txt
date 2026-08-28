@@ -1,4 +1,5 @@
 add_library(artiengine STATIC
+    scene/component_registration.cpp
     scene/render_scene_extractor.cpp
 )
 add_library(ArtiEngine::Engine ALIAS artiengine)

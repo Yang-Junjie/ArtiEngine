@@ -10,8 +10,6 @@
 namespace arti::engine {
 namespace {
 
-// 世界变换的 -Z 轴，也就是光的传播方向（从光源射出）。
-// rendering::LightDesc::direction 要的正是这个朝向，pass 那边会取反。
 glm::vec3 forwardOf(const glm::mat4& world) noexcept {
     const glm::vec3 forward{ -world[2] };
     const float length = glm::length(forward);
@@ -23,22 +21,19 @@ glm::vec3 forwardOf(const glm::mat4& world) noexcept {
 
 const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         const rendering::Renderer& renderer, ExtractTarget target) {
-    // ArtiChoco 的世界变换是惰性的，必须显式刷。
     scene.updateWorldTransforms();
 
-    // clear 而不是重新构造：容量留住，稳定下来之后每帧零分配。
+
     m_render_scene.draws.clear();
     m_render_scene.lights.clear();
     m_render_scene.view = {};
     m_has_camera = false;
 
-    // 相机。aspect 从目标尺寸算，不从组件读 —— 见 CameraComponent 的注释。
     for (const auto [entity, world, camera]:
             scene.view<scene::WorldTransformComponent, CameraComponent>().each()) {
         if (!camera.primary) {
             continue;
         }
-        // 目标退化（窗口最小化、面板折叠）时不要算出 inf/NaN 的投影，整帧交给调用方跳过。
         if (target.width == 0 || target.height == 0) {
             break;
         }
@@ -68,8 +63,9 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         m_render_scene.lights.push_back(desc);
     }
 
-    for (const auto [entity, world, mesh_renderer]:
-            scene.view<scene::WorldTransformComponent, MeshRendererComponent>().each()) {
+    for (const auto [entity, world, mesh_renderer, id]:
+            scene.view<scene::WorldTransformComponent, MeshRendererComponent, scene::IDComponent>()
+                    .each()) {
         // 变量名不叫 renderer：那个名字被 rendering::Renderer 参数占了。
         if (!mesh_renderer.visible || !mesh_renderer.mesh.isValid()) {
             continue;
@@ -80,20 +76,41 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         draw.material = mesh_renderer.material;
         draw.transform = world.world;
         draw.world_bounds = worldBounds(renderer, mesh_renderer.mesh, world.world);
+        // 用 UUID 而不是 entt 的 handle 发号：handle 在实体销毁后会被复用，UUID 不会，
+        // 而拾取的读回是跨帧的 —— 复用的 handle 会让结果指向一个不相干的新实体。
+        draw.picking_id = pickingIdFor(id.id);
         m_render_scene.draws.push_back(draw);
     }
 
     return m_render_scene;
 }
 
+uint32_t RenderSceneExtractor::pickingIdFor(core::UUID entity) {
+    const auto existing = m_picking_ids.find(entity);
+    if (existing != m_picking_ids.end()) {
+        return existing->second;
+    }
+
+    const uint32_t id = m_next_picking_id++;
+    m_picking_ids.emplace(entity, id);
+    m_picking_entities.emplace(id, entity);
+    return id;
+}
+
+std::optional<core::UUID> RenderSceneExtractor::entityForPickingId(uint32_t picking_id) const {
+    // 0 是「空处」，不用查表。
+    if (picking_id == 0) {
+        return std::nullopt;
+    }
+    const auto found = m_picking_entities.find(picking_id);
+    return found == m_picking_entities.end() ? std::nullopt : std::optional{ found->second };
+}
+
 rendering::AABB RenderSceneExtractor::worldBounds(const rendering::Renderer& renderer,
         rendering::MeshHandle mesh, const glm::mat4& world) {
-    // 网格上传之后包围盒就不变了，所以查一次缓存住 —— 否则每帧每 draw 都要问一次 Renderer。
     auto cached = m_mesh_bounds.find(mesh);
     if (cached == m_mesh_bounds.end()) {
         const auto info = renderer.meshInfo(mesh);
-        // 查不到就记一个空盒子。这里不报警：句柄无效的 draw 会在 ArtiRenderer 的 resolveDraw
-        // 里被跳掉并记日志，重复报没有意义。
         cached = m_mesh_bounds.emplace(mesh, info ? info->bounds : rendering::AABB{}).first;
     }
     return cached->second.transformed(world);
