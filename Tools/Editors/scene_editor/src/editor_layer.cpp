@@ -2,11 +2,17 @@
 
 #include "editor_camera.h"
 #include "editor_gizmo.h"
+#include "editor_project.h"
+#include "file_dialogs.h"
 #include "hierarchy_panel.h"
 #include "inspector_panel.h"
 #include "viewport_panel.h"
 
 #include "arti_engine.h"
+#include "asset/builtin_assets.h"
+#include "asset/gpu_asset_cache.h"
+#include "asset/material_asset.h"
+#include "asset/mesh_asset.h"
 #include "imgui/imgui_host.h"
 
 #include "artichoco/core/application.h"
@@ -80,12 +86,13 @@ rendering::Mesh makeCubeMesh() {
 } // namespace
 
 EditorLayer::EditorLayer(const char* scene_path, uint32_t frame_limit, bool auto_play,
-        bool auto_pick)
+        bool auto_pick, bool auto_project)
         : Layer("EditorLayer"),
           m_scene_path(scene_path ? scene_path : ""),
           m_frame_limit(frame_limit),
           m_auto_play(auto_play),
-          m_auto_pick(auto_pick) {}
+          m_auto_pick(auto_pick),
+          m_auto_project(auto_project) {}
 
 EditorLayer::~EditorLayer() = default;
 
@@ -109,6 +116,7 @@ void EditorLayer::onAttach() {
     m_extractor = std::make_unique<engine::RenderSceneExtractor>();
     m_editor_camera = std::make_unique<EditorCamera>();
     m_gizmo = std::make_unique<EditorGizmo>();
+    m_project = std::make_unique<EditorProject>(*m_renderer);
 
     engine::ImGuiHostCreateInfo imgui_info;
     imgui_info.persist_layout = true;
@@ -119,11 +127,14 @@ void EditorLayer::onAttach() {
     m_inspector_panel = std::make_unique<InspectorPanel>(*m_scene);
     m_viewport_panel = std::make_unique<ViewportPanel>(*m_renderer);
 
-    if (!m_scene_path.empty()) {
-        app.getLogChannel().warn("Scene serialization not implemented yet, using default scene");
-        createDefaultScene();
-    } else {
-        createDefaultScene();
+    // 自动化跑时不能弹文件对话框，所以 --auto-project 在临时目录里开一个。
+    // 和 --frames 分开是刻意的：没项目那条路必须能被自动化覆盖 ——
+    // 它正是「黑屏」那个 bug 藏身的地方，而当时所有用例都带 --frames、都自动建了项目。
+    if (m_auto_project) {
+        const auto root = std::filesystem::temp_directory_path() / "ArtiEngineSmokeProject";
+        if (m_project->create(root, "SmokeProject")) {
+            createDefaultScene();
+        }
     }
 
     const auto output = m_renderer->outputInfo();
@@ -230,29 +241,43 @@ void EditorLayer::onImGuiRender() {
 }
 
 void EditorLayer::onRender() {
-    if (!m_renderer || !m_scene) {
+    if (!m_renderer) {
         return;
     }
 
+    // renderFrame 是**唯一**提交 ImGui draw data 的地方（onImGuiRender 只生成，不提交）。
+    // 所以这个函数必须无条件走到它 —— 任何 early return 都是整个界面黑屏，
+    // 而黑屏时用户连菜单都点不到，没法自救。
+    //
+    // 场景画不出来的情况（没开项目、面板尺寸为 0、Play 模式没相机）就提交一个空场景：
+    // 没有 draw、只有 UI 覆盖层。IntoUI 模式下 ImGuiPass 会清 backbuffer，所以界面正常。
     m_renderer->setSceneTargetSize(m_viewport_width, m_viewport_height);
 
-    if (m_viewport_width == 0 || m_viewport_height == 0) {
-        return;
+    const bool can_extract = m_scene && m_project && m_project->isOpen() && m_viewport_width != 0 &&
+                             m_viewport_height != 0;
+
+    const rendering::RenderScene* submit = nullptr;
+    rendering::RenderScene empty;
+
+    if (can_extract) {
+        engine::ExtractTarget target;
+        target.width = m_viewport_width;
+        target.height = m_viewport_height;
+        submit = &m_extractor->extract(*m_scene, m_project->gpuAssets(), *m_renderer, target);
+
+        if (m_mode == Mode::Edit) {
+            m_extractor->overrideView(
+                    m_editor_camera->buildRenderView(m_viewport_width, m_viewport_height));
+        } else if (!m_extractor->hasCamera()) {
+            // Play 模式但场景里没有 primary 相机：不画场景，但 UI 要留着 ——
+            // 否则用户按不到 Stop。toolbar 上那行红字说明原因。
+            submit = &empty;
+        }
+    } else {
+        submit = &empty;
     }
 
-    engine::ExtractTarget target;
-    target.width = m_viewport_width;
-    target.height = m_viewport_height;
-    const auto& render_scene = m_extractor->extract(*m_scene, *m_renderer, target);
-
-    if (m_mode == Mode::Edit) {
-        m_extractor->overrideView(
-                m_editor_camera->buildRenderView(m_viewport_width, m_viewport_height));
-    } else if (!m_extractor->hasCamera()) {
-        return;
-    }
-
-    const auto statistics = m_renderer->renderFrame(render_scene,
+    const auto statistics = m_renderer->renderFrame(*submit,
             m_imgui ? m_imgui->overlay() : rendering::FrameOverlay{});
     m_last_statistics = statistics;
 
@@ -271,38 +296,45 @@ void EditorLayer::onRender() {
     }
 }
 
-void EditorLayer::createDefaultScene() {
-    constexpr uint32_t checker_size = 64;
-    std::vector<std::byte> texels(static_cast<size_t>(checker_size) * checker_size * 4);
-    for (uint32_t y = 0; y < checker_size; ++y) {
-        for (uint32_t x = 0; x < checker_size; ++x) {
-            const bool light = ((x / 8) + (y / 8)) % 2 == 0;
-            const auto value = static_cast<std::byte>(light ? 230 : 60);
-            const size_t offset = (static_cast<size_t>(y) * checker_size + x) * 4;
-            texels[offset + 0] = value;
-            texels[offset + 1] = value;
-            texels[offset + 2] = value;
-            texels[offset + 3] = static_cast<std::byte>(255);
-        }
+void EditorLayer::newProject() {
+    // 选目录而不是选文件：新项目的 .artiproj 还不存在，要先定根目录。
+    const auto root = FileDialogs::selectDirectory({});
+    if (root.empty()) {
+        return;
     }
 
-    rendering::TextureDesc texture_desc;
-    texture_desc.texels = std::span{ texels };
-    texture_desc.width = checker_size;
-    texture_desc.height = checker_size;
-    texture_desc.format = rendering::TextureFormat::RGBA8Unorm;
-    texture_desc.debug_name = "Editor checker";
-    m_checker_texture = m_renderer->createTexture(texture_desc);
+    if (!m_project->create(root, root.filename().string())) {
+        return;
+    }
+    // 换项目后旧场景引用的资产 UUID 在新 catalog 里可能不存在，所以重建场景。
+    m_scene->clearEntities();
+    m_hierarchy_panel->setSelectedEntity(std::nullopt);
+    createDefaultScene();
+}
 
-    rendering::Material material;
-    material.type = rendering::MaterialType::BlinnPhong;
-    material.base_color = glm::vec4{ 1.0f, 0.85f, 0.7f, 1.0f };
-    material.base_color_texture = m_checker_texture;
-    material.specular_color = glm::vec3{ 1.0f };
-    material.specular_strength = 0.6f;
-    material.shininess = 32.0f;
-    m_default_material = m_renderer->createMaterial(material);
-    m_cube_mesh = m_renderer->createMesh(makeCubeMesh(), "Editor cube");
+void EditorLayer::openProject() {
+    const auto file = FileDialogs::openFile("Arti Project\0*.artiproj\0", {});
+    if (file.empty()) {
+        return;
+    }
+
+    if (!m_project->open(file)) {
+        return;
+    }
+    m_scene->clearEntities();
+    m_hierarchy_panel->setSelectedEntity(std::nullopt);
+    createDefaultScene();
+}
+
+void EditorLayer::createDefaultScene() {
+    // 引用内置资产，不再现场造网格和材质。内置资产的 UUID 是常量，所以这个场景存盘之后
+    // 在任何项目里读回来都指向同一个立方体。
+    const arti::asset::AssetHandle<engine::asset::MeshAsset> cube_mesh{
+        engine::asset::kBuiltinCubeMesh
+    };
+    const arti::asset::AssetHandle<engine::asset::MaterialAsset> default_material{
+        engine::asset::kBuiltinDefaultMaterial
+    };
 
     auto camera = m_scene->createEntity("Main Camera");
     camera.getComponent<scene::TransformComponent>().translation = glm::vec3{ 0.0f, 1.5f, 4.0f };
@@ -318,8 +350,8 @@ void EditorLayer::createDefaultScene() {
         cube.getComponent<scene::TransformComponent>().translation =
                 glm::vec3{ static_cast<float>(index) * 1.6f, 0.0f, 0.0f };
         auto& mesh_renderer = cube.addComponent<engine::MeshRendererComponent>();
-        mesh_renderer.mesh = m_cube_mesh;
-        mesh_renderer.material = m_default_material;
+        mesh_renderer.mesh = cube_mesh;
+        mesh_renderer.materials.push_back(default_material);
     }
 
     core::Application::get().getLogChannel().info("Created default scene");
@@ -328,14 +360,20 @@ void EditorLayer::createDefaultScene() {
 void EditorLayer::drawMenuBar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("New Scene", "Ctrl+N")) {
+            if (ImGui::MenuItem("New Project...")) {
+                newProject();
             }
-            if (ImGui::MenuItem("Open Scene...", "Ctrl+O")) {
+            if (ImGui::MenuItem("Open Project...")) {
+                openProject();
             }
-            if (ImGui::MenuItem("Save Scene", "Ctrl+S")) {
-            }
-            if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S")) {
-            }
+            ImGui::Separator();
+            // 场景的存读还没做 —— 需要先把组件注册进 SceneSerializationRegistry。
+            // 置灰而不是留空实现：点了没反应比点不动更难判断是「没做」还是「坏了」。
+            const bool project_open = m_project && m_project->isOpen();
+            ImGui::MenuItem("New Scene", "Ctrl+N", false, false);
+            ImGui::MenuItem("Open Scene...", "Ctrl+O", false, false);
+            ImGui::MenuItem("Save Scene", "Ctrl+S", false, false);
+            (void) project_open;
             ImGui::Separator();
             if (ImGui::MenuItem("Exit")) {
                 core::Application::get().close();

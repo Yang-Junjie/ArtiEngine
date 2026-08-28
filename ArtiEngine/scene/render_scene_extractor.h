@@ -10,6 +10,10 @@ namespace arti::scene {
 class Scene;
 } // namespace arti::scene
 
+namespace arti::engine::asset {
+class GpuAssetCache;
+} // namespace arti::engine::asset
+
 namespace arti::engine {
 
 struct ExtractTarget {
@@ -18,8 +22,10 @@ struct ExtractTarget {
 };
 class RenderSceneExtractor {
 public:
-    const rendering::RenderScene& extract(scene::Scene& scene, const rendering::Renderer& renderer,
-            ExtractTarget target);
+    // assets 把组件里的资产引用解析成 renderer 句柄；renderer 用来读网格的局部包围盒。
+    // 两个都传是因为职责不同：一个管「资产 -> GPU」，一个管「GPU 资源的属性」。
+    const rendering::RenderScene& extract(scene::Scene& scene, asset::GpuAssetCache& assets,
+            const rendering::Renderer& renderer, ExtractTarget target);
 
     const rendering::RenderScene& renderScene() const noexcept { return m_render_scene; }
 

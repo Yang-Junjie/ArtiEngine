@@ -1,15 +1,23 @@
 #pragma once
 #include "arti_renderer.h"
+#include "artichoco/asset/asset.h"
 
 #include <cstdint>
+#include <vector>
 
 #include <glm/vec3.hpp>
 
 namespace arti::engine {
 
+namespace asset {
+class MaterialAsset;
+class MeshAsset;
+} // namespace asset
+
 struct MeshRendererComponent {
-    rendering::MeshHandle mesh;
-    rendering::MaterialHandle material;
+    arti::asset::AssetHandle<asset::MeshAsset> mesh;
+    std::vector<arti::asset::AssetHandle<asset::MaterialAsset>> materials;
+
     uint32_t submesh_index{ 0 };
     bool visible{ true };
 };

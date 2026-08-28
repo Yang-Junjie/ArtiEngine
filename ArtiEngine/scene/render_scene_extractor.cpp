@@ -2,6 +2,7 @@
 
 #include "artichoco/scene/components.h"
 #include "artichoco/scene/scene.h"
+#include "asset/gpu_asset_cache.h"
 #include "components.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
@@ -19,7 +20,7 @@ glm::vec3 forwardOf(const glm::mat4& world) noexcept {
 } // namespace
 
 const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
-        const rendering::Renderer& renderer, ExtractTarget target) {
+        asset::GpuAssetCache& assets, const rendering::Renderer& renderer, ExtractTarget target) {
     scene.updateWorldTransforms();
 
     m_render_scene.draws.clear();
@@ -59,17 +60,28 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
     }
 
     for (const auto [entity, world, mesh_renderer, id]:
-            scene.view<scene::WorldTransformComponent, MeshRendererComponent, scene::IDComponent>()
-                    .each()) {
+            scene.view<scene::WorldTransformComponent, MeshRendererComponent, scene::IDComponent>().each()) {
         if (!mesh_renderer.visible || !mesh_renderer.mesh.isValid()) {
             continue;
         }
+
+
+        const auto mesh = assets.meshHandle(mesh_renderer.mesh.id());
+        if (!mesh.isValid()) {
+            continue;
+        }
+
         rendering::DrawItem draw;
-        draw.mesh = mesh_renderer.mesh;
+        draw.mesh = mesh;
         draw.submesh_index = mesh_renderer.submesh_index;
-        draw.material = mesh_renderer.material;
+        // 按 submesh 取对应槽的材质。数组比槽短或者那一项无效时留空句柄 ——
+        // 资源注册表会回退到默认材质，而不是整个不画。
+        if (mesh_renderer.submesh_index < mesh_renderer.materials.size()) {
+            draw.material = assets.materialHandle(
+                    mesh_renderer.materials[mesh_renderer.submesh_index].id());
+        }
         draw.transform = world.world;
-        draw.world_bounds = worldBounds(renderer, mesh_renderer.mesh, world.world);
+        draw.world_bounds = worldBounds(renderer, mesh, world.world);
         draw.picking_id = pickingIdFor(id.id);
         m_render_scene.draws.push_back(draw);
     }

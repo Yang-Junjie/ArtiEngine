@@ -20,12 +20,15 @@ Application* createApplication(int argc, char** argv) {
     uint32_t frame_limit = 0;
     bool auto_play = false;
     bool auto_pick = false;
+    bool auto_project = false;
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{ argv[index] };
         if (argument == "--auto-play") {
             auto_play = true;
         } else if (argument == "--auto-pick") {
             auto_pick = true;
+        } else if (argument == "--auto-project") {
+            auto_project = true;
         } else if (argument == "--frames" && (index + 1) < argc) {
             const std::string_view value{ argv[++index] };
             uint32_t parsed = 0;
@@ -39,8 +42,8 @@ Application* createApplication(int argc, char** argv) {
     }
 
     auto* app = new Application(info);
-    app->pushLayer(
-            std::make_unique<editor::EditorLayer>(scene_path, frame_limit, auto_play, auto_pick));
+    app->pushLayer(std::make_unique<editor::EditorLayer>(scene_path, frame_limit, auto_play,
+            auto_pick, auto_project));
     return app;
 }
 

@@ -133,7 +133,7 @@ void InspectorPanel::drawMeshRendererComponent(scene::Entity& entity) {
 
     ImGui::Checkbox("Visible", &mesh_renderer->visible);
     ImGui::Text("Mesh:     %s", mesh_renderer->mesh.isValid() ? "set" : "none");
-    ImGui::Text("Material: %s", mesh_renderer->material.isValid() ? "set" : "none");
+    ImGui::Text("Materials: %zu slot(s)", mesh_renderer->materials.size());
 
     int submesh = static_cast<int>(mesh_renderer->submesh_index);
     if (ImGui::DragInt("Submesh", &submesh, 1.0f, 0, 64)) {

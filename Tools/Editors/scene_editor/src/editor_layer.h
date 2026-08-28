@@ -28,6 +28,7 @@ namespace arti::editor {
 
 class EditorCamera;
 class EditorGizmo;
+class EditorProject;
 class HierarchyPanel;
 class InspectorPanel;
 class ViewportPanel;
@@ -35,7 +36,7 @@ class ViewportPanel;
 class EditorLayer final : public core::Layer {
 public:
     EditorLayer(const char* scene_path, uint32_t frame_limit = 0, bool auto_play = false,
-            bool auto_pick = false);
+            bool auto_pick = false, bool auto_project = false);
     ~EditorLayer() override;
 
     void onAttach() override;
@@ -48,6 +49,8 @@ private:
     enum class Mode { Edit, Play };
 
     void createDefaultScene();
+    void newProject();
+    void openProject();
     void drawMenuBar();
     void drawToolbar();
     void updateEditorCamera(float deltaTime);
@@ -60,6 +63,7 @@ private:
     uint32_t m_frame_limit{ 0 };
     bool m_auto_play{ false };
     bool m_auto_pick{ false };
+    bool m_auto_project{ false };
 
     std::unique_ptr<renderer::RenderDevice> m_render_device;
     std::unique_ptr<rendering::Renderer> m_renderer;
@@ -71,6 +75,7 @@ private:
     core::FixedTimestepAccumulator m_fixed_accumulator;
     uint64_t m_play_frame_index{ 0 };
 
+    std::unique_ptr<EditorProject> m_project;
     std::unique_ptr<EditorCamera> m_editor_camera;
     std::unique_ptr<EditorGizmo> m_gizmo;
     std::unique_ptr<HierarchyPanel> m_hierarchy_panel;
@@ -82,10 +87,6 @@ private:
 
     uint32_t m_viewport_width{ 0 };
     uint32_t m_viewport_height{ 0 };
-
-    rendering::MeshHandle m_cube_mesh;
-    rendering::MaterialHandle m_default_material;
-    rendering::TextureHandle m_checker_texture;
 };
 
 } // namespace arti::editor

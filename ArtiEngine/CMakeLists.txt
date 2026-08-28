@@ -1,4 +1,11 @@
 add_library(artiengine STATIC
+    asset/builtin_assets.cpp
+    asset/detail/mesh_artifact.cpp
+    asset/gpu_asset_cache.cpp
+    asset/loaders/material_loader.cpp
+    asset/loaders/mesh_loader.cpp
+    asset/material_asset.cpp
+    asset/mesh_asset.cpp
     scene/component_registration.cpp
     scene/render_scene_extractor.cpp
 )
@@ -16,6 +23,8 @@ target_link_libraries(artiengine
         ArtiRenderer::Renderer
         ArtiChoco::Core
         ArtiChoco::Scene
+        # 资产类型继承 arti::asset::Asset、loader 实现它的接口，所以也是 PUBLIC。
+        ArtiChoco::Asset
         ArtiSDK::GLM
 )
 
