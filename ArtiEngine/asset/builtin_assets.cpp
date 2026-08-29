@@ -90,9 +90,8 @@ bool writeBuiltin(arti::asset::AssetManager& assets, core::UUID handle, std::str
 
 bool ensureBuiltinAssets(arti::asset::AssetManager& assets) {
     const bool cube_present = assets.catalog().find(kBuiltinCubeMesh).has_value();
-    const bool material_present = assets.catalog().find(kBuiltinDefaultMaterial).has_value();
-    const bool pbr_present = assets.catalog().find(kBuiltinPbrMaterial).has_value();
-    if (cube_present && material_present && pbr_present) {
+    const bool pbr_present = assets.catalog().find(kBuiltinDefaultMaterial).has_value();
+    if (cube_present && pbr_present) {
         return true;
     }
 
@@ -116,25 +115,15 @@ bool ensureBuiltinAssets(arti::asset::AssetManager& assets) {
              ok;
     }
 
-    if (!material_present) {
-        const auto artifact = encodeMaterialArtifact(MaterialAsset::Params{});
-        ok = writeBuiltin(assets, kBuiltinDefaultMaterial, kMaterialAssetType,
-                     "Builtin/Default.material",
-                     std::filesystem::path{ "Builtin" } / "Default.material", artifact) &&
-             ok;
-    }
-
     if (!pbr_present) {
         MaterialAsset::Params params;
         params.type = rendering::MaterialType::PBR;
         params.roughness_strength = 0.5f;
-        // TODO(patch): metallic 定成 0 的原始理由是「没有 IBL 时金属只有常数环境项、
-        // 看起来像坏的」。IBL 已经落地，这个理由不再成立 —— 可以调成金属看实际效果了。
-        params.metallic_strength = 0.0f;
+        params.metallic_strength = 1.0f;
         const auto artifact = encodeMaterialArtifact(params);
-        ok = writeBuiltin(assets, kBuiltinPbrMaterial, kMaterialAssetType,
-                     "Builtin/DefaultPbr.material",
-                     std::filesystem::path{ "Builtin" } / "DefaultPbr.material", artifact) &&
+        ok = writeBuiltin(assets, kBuiltinDefaultMaterial, kMaterialAssetType,
+                     "Builtin/Default.material",
+                     std::filesystem::path{ "Builtin" } / "Default.material", artifact) &&
              ok;
     }
 

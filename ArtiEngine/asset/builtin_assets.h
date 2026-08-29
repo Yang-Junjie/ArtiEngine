@@ -9,7 +9,6 @@ namespace arti::engine::asset {
 
 inline constexpr core::UUID kBuiltinCubeMesh{ 0xB0117E1000000001ULL };
 inline constexpr core::UUID kBuiltinDefaultMaterial{ 0xB0117E1000000002ULL };
-inline constexpr core::UUID kBuiltinPbrMaterial{ 0xB0117E1000000003ULL };
 
 bool ensureBuiltinAssets(arti::asset::AssetManager& assets);
 

@@ -1,8 +1,8 @@
 Asset:
-  Handle: 59582e18df35b9eb
+  Handle: 9d41082f83479e1d
   Type: artiengine.asset.texture
   SourcePath: Model/DamagedHelmet/Default_emissive.jpg
-  ArtifactPath: Imported/59582e18df35b9eb.artitexture
+  ArtifactPath: Imported/9d41082f83479e1d.artitexture
   Properties:
     importer: !arti/string artiengine.TextureImporter
     filter: !arti/string linear

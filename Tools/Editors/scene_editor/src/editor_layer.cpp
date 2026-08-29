@@ -36,6 +36,7 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include <imgui.h>
 #include <span>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -304,9 +305,6 @@ bool EditorLayer::saveScene(const std::filesystem::path& path) {
                     relative.native().find(L"..") == std::wstring::npos) {
                 project::ProjectInfo updated = *info;
                 updated.last_open_scene = relative;
-                if (updated.start_scene.empty()) {
-                    updated.start_scene = relative;
-                }
                 projects.setProjectInfo(updated);
                 projects.saveProject();
             }
@@ -341,8 +339,9 @@ void EditorLayer::newProject() {
         return;
     }
     // 换项目后旧场景引用的资产 UUID 在新 catalog 里可能不存在，所以重建场景。
-    m_scene->clearEntities();
-    m_hierarchy_panel->setSelectedEntity(std::nullopt);
+    // m_scene_file 也要清 —— 否则 Ctrl+S 会把新项目的场景写回上一个项目里去。
+    resetSceneState();
+    m_scene_file.clear();
     createDefaultScene();
 }
 
@@ -355,9 +354,50 @@ void EditorLayer::openProject() {
     if (!m_project->open(file)) {
         return;
     }
-    m_scene->clearEntities();
-    m_hierarchy_panel->setSelectedEntity(std::nullopt);
-    createDefaultScene();
+    resetSceneState();
+    m_scene_file.clear();
+    // 项目记着上次打开的场景就接着上次的，否则给个默认场景。
+    if (!loadLastOpenScene()) {
+        createDefaultScene();
+    }
+}
+
+bool EditorLayer::loadLastOpenScene() {
+    auto& log = core::Application::get().getLogChannel();
+    auto& projects = project::ProjectManager::instance();
+
+    const auto& info = projects.getProjectInfo();
+    if (!info || info->last_open_scene.empty()) {
+        return false;
+    }
+    // last_open_scene 是相对项目根的（saveScene 那边就是这么写进去的）。
+    const auto root = projects.getProjectRootPath();
+    if (!root) {
+        return false;
+    }
+
+    const auto file = *root / info->last_open_scene;
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(file, error) || error) {
+        // 场景被删了或者项目是从别的机器拷过来的 —— 不是错误，只是没得可恢复。
+        log.info("Last open scene '{}' does not exist, falling back to a default scene",
+                info->last_open_scene.string());
+        return false;
+    }
+
+    try {
+        m_serializer->load(file, *m_scene);
+    } catch (const std::exception& exception) {
+        // 和 openScene 一样：读失败不能留下半个场景。清掉，让调用方摆默认场景。
+        log.error("Failed to load the last open scene '{}': {}", file.string(), exception.what());
+        m_scene->clearEntities();
+        return false;
+    }
+
+    m_scene_file = file;
+    m_scene_dirty = false;
+    log.info("Restored the last open scene '{}'", info->last_open_scene.string());
+    return true;
 }
 
 void EditorLayer::createDefaultScene() {
@@ -366,11 +406,8 @@ void EditorLayer::createDefaultScene() {
     const arti::asset::AssetHandle<engine::asset::MeshAsset> cube_mesh{
         engine::asset::kBuiltinCubeMesh
     };
-    const arti::asset::AssetHandle<engine::asset::MaterialAsset> default_material{
-        engine::asset::kBuiltinDefaultMaterial
-    };
     const arti::asset::AssetHandle<engine::asset::MaterialAsset> pbr_material{
-        engine::asset::kBuiltinPbrMaterial
+        engine::asset::kBuiltinDefaultMaterial
     };
 
     auto camera = m_scene->createEntity("Main Camera");
@@ -391,12 +428,12 @@ void EditorLayer::createDefaultScene() {
     // 中间那个用 PBR 材质，左右两个用默认的 Blinn-Phong。并排放是为了能直接比出两条 pass
     // 的差别。
     for (int index = -1; index <= 1; ++index) {
-        auto cube = m_scene->createEntity(index == 0 ? "Cube (PBR)" : "Cube");
+        auto cube = m_scene->createEntity("Cube");
         cube.getComponent<scene::TransformComponent>().translation =
                 glm::vec3{ static_cast<float>(index) * 1.6f, 0.0f, 0.0f };
         auto& mesh_renderer = cube.addComponent<engine::MeshRendererComponent>();
         mesh_renderer.mesh = cube_mesh;
-        mesh_renderer.materials.push_back(index == 0 ? pbr_material : default_material);
+        mesh_renderer.materials.push_back(pbr_material);
     }
 
     core::Application::get().getLogChannel().info("Created default scene");

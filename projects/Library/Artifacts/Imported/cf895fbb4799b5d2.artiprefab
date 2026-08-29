@@ -7,5 +7,5 @@ Nodes:
   - Name: node_damagedHelmet_-6514
     LocalTransform: [1, 0, -0, 0, 0, -1.1920929e-07, 1.0000001, 0, 0, -1.0000001, -1.1920929e-07, 0, 0, 0, 0, 1]
     Parent: 0
-    Mesh: 04558c3107a9a876
-    Materials: [19539f4500420a09]
+    Mesh: 14b4c7976c52a52d
+    Materials: [467422df241eda92]

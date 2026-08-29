@@ -1,8 +1,8 @@
 Asset:
-  Handle: ddc37d1304d1886f
+  Handle: 1d14ef333b5f1749
   Type: artiengine.asset.texture
   SourcePath: Model/DamagedHelmet/Default_normal.jpg
-  ArtifactPath: Imported/ddc37d1304d1886f.artitexture
+  ArtifactPath: Imported/1d14ef333b5f1749.artitexture
   Properties:
     importer: !arti/string artiengine.TextureImporter
     filter: !arti/string linear

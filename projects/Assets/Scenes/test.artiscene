@@ -1,0 +1,96 @@
+Entities:
+  - EntityComponents:
+      arti.id: 18e7fadb9961f9cc
+      arti.parent: ~
+      arti.tag: Cube
+      arti.transform:
+        Translation: [1.6, -2.5398977, -2.547288]
+        Rotation: [1, 0, 0, 0]
+        Scale: [13.387965, 0.5774119, 9.805292]
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
+  - EntityComponents:
+      arti.id: 5a2018345f5b6fbc
+      arti.parent: ~
+      arti.tag: Cube
+      arti.transform:
+        Translation: [-1.6, 0, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
+  - EntityComponents:
+      arti.id: 61283b1a2d5739f0
+      arti.parent: ~
+      arti.tag: Cube (PBR)
+      arti.transform:
+        Translation: [0, 0, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
+  - EntityComponents:
+      arti.id: 7a506fa69df19ee9
+      arti.parent: e325a4fabe79c6b0
+      arti.tag: node_damagedHelmet_-6514
+      arti.transform:
+        Translation: [-3.204749, 0, 0]
+        Rotation: [0.7071067, 0.7071068, 0, 0]
+        Scale: [1, 0.9999885, 0.9999885]
+      artiengine.mesh_renderer:
+        Mesh: 14b4c7976c52a52d
+        Materials: [467422df241eda92]
+        Visible: true
+  - EntityComponents:
+      arti.id: e325a4fabe79c6b0
+      arti.parent: ~
+      arti.tag: DamagedHelmet
+      arti.transform:
+        Translation: [0, 0, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+  - EntityComponents:
+      arti.id: f214c5573f381473
+      arti.parent: ~
+      arti.tag: Environment
+      arti.transform:
+        Translation: [0, 0, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.environment:
+        EquirectTexture: b3295fb8fcd5b670
+        SkyColor: [0.03, 0.03, 0.035]
+        Intensity: 1
+        Enabled: true
+        SkyVisible: true
+  - EntityComponents:
+      arti.id: fb5553b8e30df525
+      arti.parent: ~
+      arti.tag: Main Camera
+      arti.transform:
+        Translation: [0, 1.5, 4]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.camera:
+        FovDegrees: 60
+        NearPlane: 0.1
+        FarPlane: 100
+        Primary: true
+  - EntityComponents:
+      arti.id: ff12bc1d64d8027b
+      arti.parent: ~
+      arti.tag: Directional Light
+      arti.transform:
+        Translation: [0, 0, 0]
+        Rotation: [0.87542605, -0.4082179, -0.23456971, -0.10938165]
+        Scale: [1, 1, 1]
+      artiengine.directional_light:
+        Color: [1, 1, 1]
+        Intensity: 1
+        Enabled: true

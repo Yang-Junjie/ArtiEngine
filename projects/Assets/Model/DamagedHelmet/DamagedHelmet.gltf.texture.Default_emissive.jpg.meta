@@ -1,8 +1,8 @@
 Asset:
-  Handle: fb8ca731d457424b
+  Handle: ac597d8ab9b77131
   Type: artiengine.asset.texture
   SourcePath: Model/DamagedHelmet/DamagedHelmet.gltf.texture.Default_emissive.jpg
-  ArtifactPath: Imported/fb8ca731d457424b.artitexture
+  ArtifactPath: Imported/ac597d8ab9b77131.artitexture
   Properties:
     {}
   Dependencies:

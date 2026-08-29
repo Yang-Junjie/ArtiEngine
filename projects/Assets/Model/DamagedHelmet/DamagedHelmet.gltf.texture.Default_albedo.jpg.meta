@@ -1,8 +1,8 @@
 Asset:
-  Handle: a390b8fae2b7892d
+  Handle: 1e9100170e1b2eeb
   Type: artiengine.asset.texture
   SourcePath: Model/DamagedHelmet/DamagedHelmet.gltf.texture.Default_albedo.jpg
-  ArtifactPath: Imported/a390b8fae2b7892d.artitexture
+  ArtifactPath: Imported/1e9100170e1b2eeb.artitexture
   Properties:
     {}
   Dependencies:

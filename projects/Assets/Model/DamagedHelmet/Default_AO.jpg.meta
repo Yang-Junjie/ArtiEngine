@@ -1,8 +1,8 @@
 Asset:
-  Handle: 8501462074e49a13
+  Handle: 33290193125e2b8c
   Type: artiengine.asset.texture
   SourcePath: Model/DamagedHelmet/Default_AO.jpg
-  ArtifactPath: Imported/8501462074e49a13.artitexture
+  ArtifactPath: Imported/33290193125e2b8c.artitexture
   Properties:
     importer: !arti/string artiengine.TextureImporter
     filter: !arti/string linear

@@ -7,10 +7,10 @@ Nodes:
   - Name: Mesh 0
     LocalTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
     Parent: 0
-    Mesh: 325023d2d74b7afb
-    Materials: [9acd839176fec0b3]
+    Mesh: efbfc10a997f42e9
+    Materials: [a6e3b8ab6cfce872]
   - Name: Mesh 1
     LocalTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
     Parent: 0
-    Mesh: 456be533f96955cb
-    Materials: [036f5d8cc9386976]
+    Mesh: fe65f2a8276202a6
+    Materials: [36e09935a00345b6]

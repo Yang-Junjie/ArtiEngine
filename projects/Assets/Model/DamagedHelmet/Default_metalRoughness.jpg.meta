@@ -1,8 +1,8 @@
 Asset:
-  Handle: 73e1877c12eb2b2d
+  Handle: ff3d4f5c9eba8e99
   Type: artiengine.asset.texture
   SourcePath: Model/DamagedHelmet/Default_metalRoughness.jpg
-  ArtifactPath: Imported/73e1877c12eb2b2d.artitexture
+  ArtifactPath: Imported/ff3d4f5c9eba8e99.artitexture
   Properties:
     importer: !arti/string artiengine.TextureImporter
     filter: !arti/string linear

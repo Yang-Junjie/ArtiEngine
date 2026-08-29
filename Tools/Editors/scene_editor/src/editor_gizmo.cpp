@@ -37,13 +37,13 @@ void EditorGizmo::handleShortcuts(bool enabled) {
         return;
     }
 
-    if (ImGui::IsKeyPressed(ImGuiKey_Q, false) && ImGui::GetIO().KeyCtrl) {
+    if (ImGui::IsKeyPressed(ImGuiKey_W, false) ) {
         m_operation = ImGuizmo::TRANSLATE;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_W, false) && ImGui::GetIO().KeyCtrl) {
+    if (ImGui::IsKeyPressed(ImGuiKey_E, false) ) {
         m_operation = ImGuizmo::ROTATE;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_E, false) && ImGui::GetIO().KeyCtrl) {
+    if (ImGui::IsKeyPressed(ImGuiKey_R, false) ) {
         m_operation = ImGuizmo::SCALE;
     }
 }

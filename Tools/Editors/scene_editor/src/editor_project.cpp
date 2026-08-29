@@ -28,7 +28,6 @@ EditorProject::~EditorProject() = default;
 bool EditorProject::create(const std::filesystem::path& root, const std::string& name) {
     project::ProjectInfo info;
     info.name = name;
-    // assets_path / artifacts_path 用 ProjectInfo 的默认值（Assets 和 Library/Artifacts）。
 
     if (!project::ProjectManager::instance().createProject(root, info)) {
         log().error("Failed to create the project at '{}'", root.string());
@@ -54,7 +53,6 @@ bool EditorProject::finishOpen() {
         return false;
     }
 
-    // 换项目要先丢掉上一份的 GPU 资源和工作区，否则会拿旧 UUID 查新 catalog。
     close();
 
     if (!m_assets.open(*assets_root, *artifacts_root)) {
@@ -62,8 +60,8 @@ bool EditorProject::finishOpen() {
         return false;
     }
 
-    // loader 注册在 open 之后、扫描之前。没有 loader 的类型 load() 会失败，
-    // 而内置资产要靠 load 验证是否可用。
+    // loader 注册在 open 之后、扫描之前
+    // 内置资产要靠 load 验证是否可用
     m_assets.registerLoader(std::make_unique<engine::asset::MeshLoader>());
     m_assets.registerLoader(std::make_unique<engine::asset::MaterialLoader>());
     m_assets.registerLoader(std::make_unique<engine::asset::TextureLoader>());
@@ -115,7 +113,6 @@ bool EditorProject::finishOpen() {
     m_gpu_assets = std::make_unique<engine::asset::GPUAssetCache>(m_assets, *m_renderer);
     m_open = true;
 
-    // 扫一遍 Assets/：往那个目录里丢一个 .obj，重开项目就能用。
     if (const size_t imported = importPending(); imported > 0) {
         log().info("Imported {} pending source file(s)", imported);
     }

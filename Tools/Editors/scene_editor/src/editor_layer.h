@@ -53,6 +53,9 @@ private:
     void createDefaultScene();
     void newProject();
     void openProject();
+    // 打开项目后按 ProjectInfo::last_open_scene 恢复场景。返回是否真的读进来了 ——
+    // 返回 false 的时候调用方要退回 createDefaultScene()。
+    bool loadLastOpenScene();
 
     void newScene();
     void openScene();
