@@ -301,9 +301,10 @@ void InspectorPanel::drawEnvironmentComponent(scene::Entity& entity) {
     }
 
     ImGui::Checkbox("Enabled", &environment->enabled);
+    ImGui::Checkbox("Sky Visible", &environment->sky_visible);
     ImGui::ColorEdit3("Sky Color", glm::value_ptr(environment->sky_color));
     ImGui::DragFloat("Intensity", &environment->intensity, 0.05f, 0.0f, 100.0f);
-    ImGui::TextDisabled("Equirect texture is not consumed yet (waiting on IBL)");
+    ImGui::TextDisabled("No equirect texture: sky color acts as a constant ambient");
 
     if (ImGui::SmallButton("Remove##Environment")) {
         entity.removeComponent<engine::EnvironmentComponent>();

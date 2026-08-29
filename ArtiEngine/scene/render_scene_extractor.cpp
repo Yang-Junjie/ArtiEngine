@@ -69,6 +69,7 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         desc.sky_color = glm::vec4{ environment.sky_color, 1.0f };
         desc.intensity = environment.intensity;
         desc.enabled = environment.enabled;
+        desc.sky_visible = environment.sky_visible;
         m_render_scene.environment = desc;
         break;
     }

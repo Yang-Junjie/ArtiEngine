@@ -43,14 +43,15 @@ struct DirectionalLightComponent {
 //
 // 字段和 rendering::EnvironmentDesc 一一对应，只是贴图那一项是资产引用而不是渲染句柄。
 struct EnvironmentComponent {
-    // 线性 HDR 的等距柱状投影源图。IBL 的输入 —— 现在还没有被渲染端消费，
-    // 填了也只是被带到 RenderScene 上放着。
+    // 线性 HDR 的等距柱状投影源图。烘成 cubemap 之后供 IBL 和天空使用。
     arti::asset::AssetHandle<asset::TextureAsset> equirect_texture;
-    // 没有环境贴图时的常数环境光。
+    // 没有环境贴图时的常数环境光。有贴图时不参与着色（IBL 取代它）。
     glm::vec3 sky_color{ 0.03f, 0.03f, 0.035f };
     // 线性倍率，不是光度学单位。
     float intensity{ 1.0f };
     bool enabled{ true };
+    // 要不要把环境画成天空背景。关掉时背景是 clear_color，但 IBL 照常起作用。
+    bool sky_visible{ true };
 };
 
 } // namespace arti::engine

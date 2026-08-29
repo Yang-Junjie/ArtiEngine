@@ -15,6 +15,7 @@
 #include "asset/material_asset.h"
 #include "asset/mesh_asset.h"
 #include "asset/prefab_asset.h"
+#include "asset/texture_asset.h"
 #include "imgui/imgui_host.h"
 
 #include "artichoco/core/application.h"
@@ -101,15 +102,10 @@ std::string sourceStemName(const std::filesystem::path& source_path) {
 
 } // namespace
 
-EditorLayer::EditorLayer(const char* scene_path, uint32_t frame_limit, bool auto_play,
-        bool auto_pick, bool auto_project, bool auto_scene_io)
+EditorLayer::EditorLayer(EditorLayerOptions options)
         : Layer("EditorLayer"),
-          m_scene_path(scene_path ? scene_path : ""),
-          m_frame_limit(frame_limit),
-          m_auto_play(auto_play),
-          m_auto_pick(auto_pick),
-          m_auto_project(auto_project),
-          m_auto_scene_io(auto_scene_io) {}
+          m_scene_path(options.scene_path ? options.scene_path : ""),
+          m_options(std::move(options)) {}
 
 EditorLayer::~EditorLayer() = default;
 
@@ -152,10 +148,18 @@ void EditorLayer::onAttach() {
     // 自动化跑时不能弹文件对话框，所以 --auto-project 在临时目录里开一个。
     // 和 --frames 分开是刻意的：没项目那条路必须能被自动化覆盖 ——
     // 它正是「黑屏」那个 bug 藏身的地方，而当时所有用例都带 --frames、都自动建了项目。
-    if (m_auto_project) {
+    //
+    // --project 是另一条：打开一个真实项目，用它自己的资产。手工跑也用得上（不用点对话框）。
+    if (!m_options.project_file.empty()) {
+        if (m_project->open(m_options.project_file)) {
+            createDefaultScene();
+            applyEnvironmentOverride();
+        }
+    } else if (m_options.auto_project) {
         const auto root = std::filesystem::temp_directory_path() / "ArtiEngineSmokeProject";
         if (m_project->create(root, "SmokeProject")) {
             createDefaultScene();
+            applyEnvironmentOverride();
         }
     }
 
@@ -187,16 +191,16 @@ void EditorLayer::onUpdate(core::Timestep deltaTime) {
         return;
     }
 
-    if (m_auto_play && m_frame_limit != 0 && m_mode == Mode::Edit &&
-            m_frame_index >= m_frame_limit / 2) {
+    if (m_options.auto_play && m_options.frame_limit != 0 && m_mode == Mode::Edit &&
+            m_frame_index >= m_options.frame_limit / 2) {
         enterPlayMode();
     }
     // 等几帧让资产加载和第一帧渲染完成，再做存读往返。
-    if (m_auto_scene_io && m_frame_index == 10 && m_project && m_project->isOpen()) {
+    if (m_options.auto_scene_io && m_frame_index == 10 && m_project && m_project->isOpen()) {
         runSceneIoCheck();
     }
 
-    if (m_frame_limit != 0 && m_frame_index >= m_frame_limit) {
+    if (m_options.frame_limit != 0 && m_frame_index >= m_options.frame_limit) {
         if (m_mode == Mode::Play) {
             exitPlayMode();
         }
@@ -263,7 +267,7 @@ void EditorLayer::onImGuiRender() {
 
     if (const auto click = m_viewport_panel->consumeClick()) {
         m_renderer->requestPick(rendering::PickRequest{ click->first, click->second });
-    } else if (m_auto_pick && m_viewport_width != 0 && m_frame_index % 20 == 0) {
+    } else if (m_options.auto_pick && m_viewport_width != 0 && m_frame_index % 20 == 0) {
         m_renderer->requestPick(
                 rendering::PickRequest{ m_viewport_width / 2, m_viewport_height / 2 });
     }
@@ -315,7 +319,7 @@ void EditorLayer::onRender() {
     if (const auto pick = m_renderer->takePickResult()) {
         const auto entity = m_extractor->entityForPickingId(pick->picking_id);
         m_hierarchy_panel->setSelectedEntity(entity);
-        if (m_auto_pick) {
+        if (m_options.auto_pick) {
             core::Application::get().getLogChannel().info("Pick at ({}, {}) -> picking_id {} ({})",
                     pick->x, pick->y, pick->picking_id, entity ? "hit" : "empty");
         }
@@ -566,6 +570,32 @@ void EditorLayer::createDefaultScene() {
     }
 
     core::Application::get().getLogChannel().info("Created default scene");
+}
+
+void EditorLayer::applyEnvironmentOverride() {
+    if (m_options.environment_source.empty() || !m_project || !m_project->isOpen()) {
+        return;
+    }
+    auto& log = core::Application::get().getLogChannel();
+
+    // 按源文件路径查回导入产物的 UUID。之所以走 catalog 而不是让命令行直接给 UUID：
+    // UUID 是导入时生成的，删了 .meta 就会变，写进脚本或测试里必然过期。
+    const auto metadata = m_project->assets().catalog().findBySourcePathAndType(
+            m_options.environment_source, std::string{ engine::asset::kTextureAssetType });
+    if (!metadata) {
+        log.error("Cannot use '{}' as the environment: not an imported texture",
+                m_options.environment_source.string());
+        return;
+    }
+
+    for (auto [entity, environment]: m_scene->view<engine::EnvironmentComponent>().each()) {
+        environment.equirect_texture =
+                arti::asset::AssetHandle<engine::asset::TextureAsset>{ metadata->handle };
+        log.info("Environment equirect set to '{}' ({})",
+                m_options.environment_source.string(), metadata->handle.toString());
+        return;
+    }
+    log.error("Cannot set the environment: the scene has no EnvironmentComponent");
 }
 
 void EditorLayer::drawMenuBar() {

@@ -141,6 +141,7 @@ YAML::Node EnvironmentSerialization::serialize(const EnvironmentComponent& compo
     node["SkyColor"] = writeVector3(component.sky_color);
     node["Intensity"] = component.intensity;
     node["Enabled"] = component.enabled;
+    node["SkyVisible"] = component.sky_visible;
     return node;
 }
 
@@ -156,6 +157,9 @@ EnvironmentComponent EnvironmentSerialization::deserialize(const YAML::Node& nod
     }
     if (node["Enabled"]) {
         component.enabled = node["Enabled"].as<bool>();
+    }
+    if (node["SkyVisible"]) {
+        component.sky_visible = node["SkyVisible"].as<bool>();
     }
     return component;
 }

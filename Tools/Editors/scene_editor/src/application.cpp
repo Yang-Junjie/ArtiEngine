@@ -16,37 +16,35 @@ Application* createApplication(int argc, char** argv) {
     info.height = 900;
     info.window_factory = platform::createSDLWindow;
 
-    const char* scene_path = nullptr;
-    uint32_t frame_limit = 0;
-    bool auto_play = false;
-    bool auto_pick = false;
-    bool auto_project = false;
-    bool auto_scene_io = false;
+    editor::EditorLayerOptions options;
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{ argv[index] };
         if (argument == "--auto-play") {
-            auto_play = true;
+            options.auto_play = true;
         } else if (argument == "--auto-pick") {
-            auto_pick = true;
+            options.auto_pick = true;
         } else if (argument == "--auto-project") {
-            auto_project = true;
+            options.auto_project = true;
         } else if (argument == "--auto-scene-io") {
-            auto_scene_io = true;
+            options.auto_scene_io = true;
+        } else if (argument == "--project" && (index + 1) < argc) {
+            options.project_file = argv[++index];
+        } else if (argument == "--environment" && (index + 1) < argc) {
+            options.environment_source = argv[++index];
         } else if (argument == "--frames" && (index + 1) < argc) {
             const std::string_view value{ argv[++index] };
             uint32_t parsed = 0;
             const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
             if (result.ec == std::errc{}) {
-                frame_limit = parsed;
+                options.frame_limit = parsed;
             }
         } else if (!argument.starts_with("--")) {
-            scene_path = argv[index];
+            options.scene_path = argv[index];
         }
     }
 
     auto* app = new Application(info);
-    app->pushLayer(std::make_unique<editor::EditorLayer>(scene_path, frame_limit, auto_play,
-            auto_pick, auto_project, auto_scene_io));
+    app->pushLayer(std::make_unique<editor::EditorLayer>(std::move(options)));
     return app;
 }
 
