@@ -23,6 +23,14 @@ public:
         float shininess{ 32.0f };
         float metallic_strength{ 0.0f };
         float roughness_strength{ 1.0f };
+        // AO 贴图的混合权重（0 = 忽略贴图，1 = 完全采用）和自发光贴图的倍率。
+        //
+        // rendering::Material 一直有这两个字段，但 toRenderMaterial() 从来没传过 ——
+        // 于是 PBR pass 里读它们的那两处永远是默认值（occlusion 1、emissive 0），
+        // 意思是 AO 贴图恒被完整采用、自发光贴图恒被乘成 0。glTF 的
+        // occlusionTexture.strength 和 KHR_materials_emissive_strength 需要它们才有地方落。
+        float occlusion_strength{ 1.0f };
+        float emissive_strength{ 0.0f };
 
         // 纹理槽与 rendering::Material 一一对应。UUID 由 importer 在导入时填好，
         // 序列化进 artifact，GPUAssetCache 负责解析成渲染期的 TextureHandle。

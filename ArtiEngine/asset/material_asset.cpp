@@ -17,6 +17,8 @@ rendering::Material MaterialAsset::toRenderMaterial() const {
     material.shininess = m_params.shininess;
     material.metallic_strength = m_params.metallic_strength;
     material.roughness_strength = m_params.roughness_strength;
+    material.occlusion_strength = m_params.occlusion_strength;
+    material.emissive_strength = m_params.emissive_strength;
     return material;
 }
 

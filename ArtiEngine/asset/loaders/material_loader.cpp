@@ -50,6 +50,8 @@ std::vector<std::byte> encodeMaterialArtifact(const MaterialAsset::Params& param
     node["Shininess"] = params.shininess;
     node["Metallic"] = params.metallic_strength;
     node["Roughness"] = params.roughness_strength;
+    node["Occlusion"] = params.occlusion_strength;
+    node["Emissive"] = params.emissive_strength;
 
     // 纹理槽只在有效时写出；缺字段的旧 artifact 读回时走默认值。
     if (params.base_color_texture.isValid()) {
@@ -111,6 +113,13 @@ std::shared_ptr<arti::asset::Asset> MaterialLoader::decode(
     }
     if (node["Roughness"]) {
         params.roughness_strength = node["Roughness"].as<float>();
+    }
+    // 缺字段时走结构体默认值，所以引入这两项之前的 artifact 读回来行为不变。
+    if (node["Occlusion"]) {
+        params.occlusion_strength = node["Occlusion"].as<float>();
+    }
+    if (node["Emissive"]) {
+        params.emissive_strength = node["Emissive"].as<float>();
     }
 
     const auto read_texture = [&node](const char* key) {
