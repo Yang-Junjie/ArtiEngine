@@ -35,6 +35,22 @@ target_include_directories(tinyobjloader SYSTEM PUBLIC
 )
 set_target_properties(tinyobjloader PROPERTIES FOLDER "ThirdParty")
 
+# cgltf：单头文件的 glTF 2.0 解析器。选它而不是 tinygltf 是因为零额外依赖
+# （tinygltf 要拉 nlohmann/json 进来），而且 accessor 读取有现成的 helper ——
+# componentType × normalized 的那堆组合不用自己拆。
+#
+# 和 tiny_obj_loader 一样，实现宏只能在**一个**翻译单元里定义，所以给个 .cpp。
+add_library(cgltf STATIC
+    cgltf/cgltf.cpp
+)
+add_library(CGltf::CGltf ALIAS cgltf)
+
+target_compile_features(cgltf PUBLIC cxx_std_20)
+target_include_directories(cgltf SYSTEM PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/cgltf"
+)
+set_target_properties(cgltf PROPERTIES FOLDER "ThirdParty")
+
 # stb_image：图片解码。源码在 ArtiChoco 的 third_party 下，但它自己不 add_subdirectory
 # （ArtiChoco 用不到），所以在这里挂进来。
 add_subdirectory("${ARTIENGINE_ARTIRENDERER_DIR}/ArtiChoco/third_party/stb"

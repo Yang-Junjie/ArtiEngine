@@ -77,6 +77,36 @@ uint16_t floatToHalf(float value) {
     return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exponent) << 10) | (mantissa >> 13));
 }
 
+// stb 的解码结果 -> DecodedImage。文件版和内存版共用，所以打包逻辑只有一份 ——
+// 两条路的差别只在怎么把字节喂给 stb。两个函数都负责 stbi_image_free。
+DecodedImage packRGBA8(stbi_uc* pixels, int width, int height) {
+    DecodedImage image;
+    image.width = static_cast<uint32_t>(width);
+    image.height = static_cast<uint32_t>(height);
+    const size_t byte_count = static_cast<size_t>(width) * height * 4;
+    image.rgba.resize(byte_count);
+    std::memcpy(image.rgba.data(), pixels, byte_count);
+    stbi_image_free(pixels);
+    return image;
+}
+
+DecodedImage packRGBA16F(float* pixels, int width, int height) {
+    DecodedImage image;
+    image.width = static_cast<uint32_t>(width);
+    image.height = static_cast<uint32_t>(height);
+    const size_t texel_count = static_cast<size_t>(width) * height;
+    image.rgba.resize(texel_count * 8);
+    for (size_t texel = 0; texel < texel_count; ++texel) {
+        const size_t destination_offset = texel * 8;
+        for (size_t channel = 0; channel < 4; ++channel) {
+            const uint16_t half = floatToHalf(pixels[texel * 4 + channel]);
+            std::memcpy(image.rgba.data() + destination_offset + channel * 2, &half, 2);
+        }
+    }
+    stbi_image_free(pixels);
+    return image;
+}
+
 } // namespace
 
 std::vector<std::byte> encodeTextureArtifact(const std::vector<std::byte>& pixels, uint32_t width,
@@ -143,15 +173,7 @@ DecodedImage decodeImageFile(const std::filesystem::path& file) {
         throw std::runtime_error("Failed to decode the image '" + file.string() +
                                  "': " + (stbi_failure_reason() ? stbi_failure_reason() : "?"));
     }
-
-    DecodedImage image;
-    image.width = static_cast<uint32_t>(width);
-    image.height = static_cast<uint32_t>(height);
-    const size_t byte_count = static_cast<size_t>(width) * height * 4;
-    image.rgba.resize(byte_count);
-    std::memcpy(image.rgba.data(), pixels, byte_count);
-    stbi_image_free(pixels);
-    return image;
+    return packRGBA8(pixels, width, height);
 }
 
 DecodedImage decodeImageRGBA16F(const std::filesystem::path& file) {
@@ -163,21 +185,33 @@ DecodedImage decodeImageRGBA16F(const std::filesystem::path& file) {
         throw std::runtime_error("Failed to decode the HDR image '" + file.string() +
                                  "': " + (stbi_failure_reason() ? stbi_failure_reason() : "?"));
     }
+    return packRGBA16F(pixels, width, height);
+}
 
-    DecodedImage image;
-    image.width = static_cast<uint32_t>(width);
-    image.height = static_cast<uint32_t>(height);
-    const size_t texel_count = static_cast<size_t>(width) * height;
-    image.rgba.resize(texel_count * 8);
-    for (size_t texel = 0; texel < texel_count; ++texel) {
-        const size_t destination_offset = texel * 8;
-        for (size_t channel = 0; channel < 4; ++channel) {
-            const uint16_t half = floatToHalf(pixels[texel * 4 + channel]);
-            std::memcpy(image.rgba.data() + destination_offset + channel * 2, &half, 2);
-        }
+DecodedImage decodeImageMemory(std::span<const std::byte> bytes) {
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    stbi_uc* pixels = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()),
+            static_cast<int>(bytes.size()), &width, &height, &channels, 4);
+    if (pixels == nullptr) {
+        throw std::runtime_error("Failed to decode an embedded image: " +
+                                 std::string{ stbi_failure_reason() ? stbi_failure_reason() : "?" });
     }
-    stbi_image_free(pixels);
-    return image;
+    return packRGBA8(pixels, width, height);
+}
+
+DecodedImage decodeImageMemoryRGBA16F(std::span<const std::byte> bytes) {
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    float* pixels = stbi_loadf_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()),
+            static_cast<int>(bytes.size()), &width, &height, &channels, 4);
+    if (pixels == nullptr) {
+        throw std::runtime_error("Failed to decode an embedded HDR image: " +
+                                 std::string{ stbi_failure_reason() ? stbi_failure_reason() : "?" });
+    }
+    return packRGBA16F(pixels, width, height);
 }
 
 std::string_view textureFormatName(rendering::TextureFormat format) {

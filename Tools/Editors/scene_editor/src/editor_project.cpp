@@ -5,6 +5,7 @@
 #include "artichoco/project/project_manager.h"
 #include "asset/builtin_assets.h"
 #include "asset/gpu_asset_cache.h"
+#include "asset/importers/gltf_importer.h"
 #include "asset/importers/obj_importer.h"
 #include "asset/importers/texture_importer.h"
 #include "asset/loaders/material_loader.h"
@@ -72,6 +73,15 @@ bool EditorProject::finishOpen() {
         auto obj = std::make_unique<engine::asset::ObjImporter>();
         auto* raw = obj.get();
         if (m_assets.registerImporter(std::move(obj))) {
+            for (const auto& extension: raw->getSupportedExtensions()) {
+                m_importers.emplace(extension, raw);
+            }
+        }
+    }
+    {
+        auto gltf = std::make_unique<engine::asset::GltfImporter>();
+        auto* raw = gltf.get();
+        if (m_assets.registerImporter(std::move(gltf))) {
             for (const auto& extension: raw->getSupportedExtensions()) {
                 m_importers.emplace(extension, raw);
             }
