@@ -9,7 +9,10 @@
 #include "inspector_panel.h"
 #include "viewport_panel.h"
 
-#include "arti_engine.h"
+#include "scene/component_registration.h"
+#include "scene/component_serialization.h"
+#include "scene/components.h"
+#include "scene/render_scene_extractor.h"
 #include "asset/builtin_assets.h"
 #include "asset/gpu_asset_cache.h"
 #include "asset/material_asset.h"
@@ -26,7 +29,6 @@
 #include "artichoco/scene/scene.h"
 #include "artichoco/scene/scene_serializer.h"
 
-#include <array>
 #include <cstddef>
 #include <cstring>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -40,57 +42,6 @@
 namespace arti::editor {
 namespace {
 
-rendering::Mesh makeCubeMesh() {
-    struct FaceDesc {
-        glm::vec3 normal;
-        glm::vec3 origin;
-        glm::vec3 right;
-        glm::vec3 up;
-    };
-
-    constexpr std::array<FaceDesc, 6> faces{ {
-        { { 1, 0, 0 }, { 1, -1, 1 }, { 0, 0, -2 }, { 0, 2, 0 } },
-        { { -1, 0, 0 }, { -1, -1, -1 }, { 0, 0, 2 }, { 0, 2, 0 } },
-        { { 0, 1, 0 }, { -1, 1, 1 }, { 2, 0, 0 }, { 0, 0, -2 } },
-        { { 0, -1, 0 }, { -1, -1, -1 }, { 2, 0, 0 }, { 0, 0, 2 } },
-        { { 0, 0, 1 }, { -1, -1, 1 }, { 2, 0, 0 }, { 0, 2, 0 } },
-        { { 0, 0, -1 }, { 1, -1, -1 }, { -2, 0, 0 }, { 0, 2, 0 } },
-    } };
-
-    rendering::Mesh mesh;
-    mesh.vertices.reserve(faces.size() * 4);
-    mesh.indices.reserve(faces.size() * 6);
-
-    for (const auto& face: faces) {
-        const auto base = static_cast<uint32_t>(mesh.vertices.size());
-        const std::array<glm::vec2, 4> uvs{ { { 0.0f, 1.0f }, { 1.0f, 1.0f }, { 1.0f, 0.0f },
-            { 0.0f, 0.0f } } };
-        const std::array<glm::vec3, 4> corners{ {
-            face.origin,
-            face.origin + face.right,
-            face.origin + face.right + face.up,
-            face.origin + face.up,
-        } };
-
-        for (size_t corner = 0; corner < corners.size(); ++corner) {
-            rendering::MeshVertex vertex;
-            vertex.position = corners[corner] * 0.5f;
-            vertex.normal = face.normal;
-            vertex.tangent = glm::normalize(face.right);
-            vertex.bitangent = glm::normalize(face.up);
-            vertex.uv = uvs[corner];
-            mesh.vertices.push_back(vertex);
-            mesh.bounds.expand(vertex.position);
-        }
-
-        for (const uint32_t offset: { 0U, 1U, 2U, 0U, 2U, 3U }) {
-            mesh.indices.push_back(base + offset);
-        }
-    }
-
-    return mesh;
-}
-
 // 子资产的 source_path 是「源文件 + 后缀链」（box.obj.mesh.0），实体名只要最前面的源文件名。
 std::string sourceStemName(const std::filesystem::path& source_path) {
     std::string name = source_path.filename().string();
@@ -102,10 +53,7 @@ std::string sourceStemName(const std::filesystem::path& source_path) {
 
 } // namespace
 
-EditorLayer::EditorLayer(EditorLayerOptions options)
-        : Layer("EditorLayer"),
-          m_scene_path(options.scene_path ? options.scene_path : ""),
-          m_options(std::move(options)) {}
+EditorLayer::EditorLayer() : Layer("EditorLayer") {}
 
 EditorLayer::~EditorLayer() = default;
 
@@ -145,24 +93,6 @@ void EditorLayer::onAttach() {
     m_viewport_panel = std::make_unique<ViewportPanel>(*m_renderer);
     m_content_browser_panel = std::make_unique<ContentBrowserPanel>(*m_project);
 
-    // 自动化跑时不能弹文件对话框，所以 --auto-project 在临时目录里开一个。
-    // 和 --frames 分开是刻意的：没项目那条路必须能被自动化覆盖 ——
-    // 它正是「黑屏」那个 bug 藏身的地方，而当时所有用例都带 --frames、都自动建了项目。
-    //
-    // --project 是另一条：打开一个真实项目，用它自己的资产。手工跑也用得上（不用点对话框）。
-    if (!m_options.project_file.empty()) {
-        if (m_project->open(m_options.project_file)) {
-            createDefaultScene();
-            applyEnvironmentOverride();
-        }
-    } else if (m_options.auto_project) {
-        const auto root = std::filesystem::temp_directory_path() / "ArtiEngineSmokeProject";
-        if (m_project->create(root, "SmokeProject")) {
-            createDefaultScene();
-            applyEnvironmentOverride();
-        }
-    }
-
     const auto output = m_renderer->outputInfo();
     app.getLogChannel().info("Scene Editor ready, output {}x{}", output.width, output.height);
 }
@@ -188,25 +118,6 @@ void EditorLayer::onDetach() {
 void EditorLayer::onUpdate(core::Timestep deltaTime) {
     ++m_frame_index;
     if (!m_scene) {
-        return;
-    }
-
-    if (m_options.auto_play && m_options.frame_limit != 0 && m_mode == Mode::Edit &&
-            m_frame_index >= m_options.frame_limit / 2) {
-        enterPlayMode();
-    }
-    // 等几帧让资产加载和第一帧渲染完成，再做存读往返。
-    if (m_options.auto_scene_io && m_frame_index == 10 && m_project && m_project->isOpen()) {
-        runSceneIoCheck();
-    }
-
-    if (m_options.frame_limit != 0 && m_frame_index >= m_options.frame_limit) {
-        if (m_mode == Mode::Play) {
-            exitPlayMode();
-        }
-        core::Application::get().getLogChannel().info("Frame limit reached after {} frames",
-                m_frame_index);
-        core::Application::get().close();
         return;
     }
 
@@ -267,9 +178,6 @@ void EditorLayer::onImGuiRender() {
 
     if (const auto click = m_viewport_panel->consumeClick()) {
         m_renderer->requestPick(rendering::PickRequest{ click->first, click->second });
-    } else if (m_options.auto_pick && m_viewport_width != 0 && m_frame_index % 20 == 0) {
-        m_renderer->requestPick(
-                rendering::PickRequest{ m_viewport_width / 2, m_viewport_height / 2 });
     }
 
     m_imgui->endFrame();
@@ -319,90 +227,12 @@ void EditorLayer::onRender() {
     if (const auto pick = m_renderer->takePickResult()) {
         const auto entity = m_extractor->entityForPickingId(pick->picking_id);
         m_hierarchy_panel->setSelectedEntity(entity);
-        if (m_options.auto_pick) {
-            core::Application::get().getLogChannel().info("Pick at ({}, {}) -> picking_id {} ({})",
-                    pick->x, pick->y, pick->picking_id, entity ? "hit" : "empty");
-        }
     }
 
     if (m_frame_index == 1 && statistics.rendered) {
         core::Application::get().getLogChannel().info("First frame rendered ({} draw calls)",
                 statistics.draw_calls);
     }
-}
-
-void EditorLayer::runSceneIoCheck() {
-    const auto& log = core::Application::get().getLogChannel();
-    const auto root = m_project->rootPath();
-    if (!root) {
-        log.error("Scene IO check needs an open project");
-        return;
-    }
-    const auto path = *root / "SceneIoCheck.artiscene";
-
-    // 存之前先量一遍：实体数，以及三种组件各自的数量。
-    // 只比实体数不够 —— 组件漏注册时实体照样在，但组件没了。
-    const auto countComponents = [this]() {
-        struct Counts {
-            size_t entities{ 0 };
-            size_t mesh_renderers{ 0 };
-            size_t cameras{ 0 };
-            size_t lights{ 0 };
-        } counts;
-        for (auto [entity, id]: m_scene->view<scene::IDComponent>().each()) {
-            ++counts.entities;
-        }
-        for (auto [entity, c]: m_scene->view<engine::MeshRendererComponent>().each()) {
-            ++counts.mesh_renderers;
-        }
-        for (auto [entity, c]: m_scene->view<engine::CameraComponent>().each()) {
-            ++counts.cameras;
-        }
-        for (auto [entity, c]: m_scene->view<engine::DirectionalLightComponent>().each()) {
-            ++counts.lights;
-        }
-        return counts;
-    };
-
-    const auto before = countComponents();
-
-    // 也记一个具体的资产引用，验证 UUID 真的往返了而不只是组件数量对上。
-    core::UUID mesh_before;
-    for (auto [entity, mesh_renderer]: m_scene->view<engine::MeshRendererComponent>().each()) {
-        mesh_before = mesh_renderer.mesh.id();
-        break;
-    }
-
-    if (!saveScene(path)) {
-        log.error("Scene IO check: save failed");
-        return;
-    }
-
-    m_scene->clearEntities();
-    try {
-        m_serializer->load(path, *m_scene);
-    } catch (const std::exception& exception) {
-        log.error("Scene IO check: load failed: {}", exception.what());
-        return;
-    }
-
-    const auto after = countComponents();
-    core::UUID mesh_after;
-    for (auto [entity, mesh_renderer]: m_scene->view<engine::MeshRendererComponent>().each()) {
-        mesh_after = mesh_renderer.mesh.id();
-        break;
-    }
-
-    const bool match = before.entities == after.entities &&
-                       before.mesh_renderers == after.mesh_renderers &&
-                       before.cameras == after.cameras && before.lights == after.lights &&
-                       mesh_before == mesh_after && mesh_after.isValid();
-
-    log.info("Scene IO check: {} (entities {}->{}, mesh {}->{}, cam {}->{}, light {}->{}, "
-             "mesh asset {})",
-            match ? "round trip OK" : "MISMATCH", before.entities, after.entities,
-            before.mesh_renderers, after.mesh_renderers, before.cameras, after.cameras,
-            before.lights, after.lights, mesh_after == mesh_before ? "same" : "CHANGED");
 }
 
 void EditorLayer::resetSceneState() {
@@ -554,12 +384,12 @@ void EditorLayer::createDefaultScene() {
 
     // 环境光做成显式实体，和相机、光源一致 —— 否则这个组件在 Add Component 菜单里躺着，
     // 没人知道它存在。默认值等于引入 EnvironmentDesc 之前 pass 里硬编码的那个环境光，
-    // 所以摆上去画面不变。也顺带让 scene IO 用例覆盖到它的序列化往返。
+    // 所以摆上去画面不变。
     auto environment = m_scene->createEntity("Environment");
     environment.addComponent<engine::EnvironmentComponent>();
 
     // 中间那个用 PBR 材质，左右两个用默认的 Blinn-Phong。并排放是为了能直接比出两条 pass
-    // 的差别，也让 PbrOpaquePass 被 smoke 用例覆盖到 —— 否则那条路在自动化里一个 draw 都不会走。
+    // 的差别。
     for (int index = -1; index <= 1; ++index) {
         auto cube = m_scene->createEntity(index == 0 ? "Cube (PBR)" : "Cube");
         cube.getComponent<scene::TransformComponent>().translation =
@@ -570,32 +400,6 @@ void EditorLayer::createDefaultScene() {
     }
 
     core::Application::get().getLogChannel().info("Created default scene");
-}
-
-void EditorLayer::applyEnvironmentOverride() {
-    if (m_options.environment_source.empty() || !m_project || !m_project->isOpen()) {
-        return;
-    }
-    auto& log = core::Application::get().getLogChannel();
-
-    // 按源文件路径查回导入产物的 UUID。之所以走 catalog 而不是让命令行直接给 UUID：
-    // UUID 是导入时生成的，删了 .meta 就会变，写进脚本或测试里必然过期。
-    const auto metadata = m_project->assets().catalog().findBySourcePathAndType(
-            m_options.environment_source, std::string{ engine::asset::kTextureAssetType });
-    if (!metadata) {
-        log.error("Cannot use '{}' as the environment: not an imported texture",
-                m_options.environment_source.string());
-        return;
-    }
-
-    for (auto [entity, environment]: m_scene->view<engine::EnvironmentComponent>().each()) {
-        environment.equirect_texture =
-                arti::asset::AssetHandle<engine::asset::TextureAsset>{ metadata->handle };
-        log.info("Environment equirect set to '{}' ({})",
-                m_options.environment_source.string(), metadata->handle.toString());
-        return;
-    }
-    log.error("Cannot set the environment: the scene has no EnvironmentComponent");
 }
 
 void EditorLayer::drawMenuBar() {

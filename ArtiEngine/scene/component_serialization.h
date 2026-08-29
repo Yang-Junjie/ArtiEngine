@@ -41,4 +41,4 @@ public:
 
 void registerSceneSerialization(scene::SceneSerializationRegistry& registry);
 
-} // namespace arti::engine
+}

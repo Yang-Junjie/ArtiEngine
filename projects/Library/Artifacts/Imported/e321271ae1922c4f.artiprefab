@@ -1,0 +1,16 @@
+Nodes:
+  - Name: mitsuba-sphere
+    LocalTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+    Parent: -1
+    Mesh: ""
+    Materials: []
+  - Name: Mesh 0
+    LocalTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+    Parent: 0
+    Mesh: 325023d2d74b7afb
+    Materials: [9acd839176fec0b3]
+  - Name: Mesh 1
+    LocalTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+    Parent: 0
+    Mesh: 456be533f96955cb
+    Materials: [036f5d8cc9386976]

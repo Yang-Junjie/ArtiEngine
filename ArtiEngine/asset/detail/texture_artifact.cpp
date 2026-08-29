@@ -77,8 +77,6 @@ uint16_t floatToHalf(float value) {
     return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exponent) << 10) | (mantissa >> 13));
 }
 
-// stb 的解码结果 -> DecodedImage。文件版和内存版共用，所以打包逻辑只有一份 ——
-// 两条路的差别只在怎么把字节喂给 stb。两个函数都负责 stbi_image_free。
 DecodedImage packRGBA8(stbi_uc* pixels, int width, int height) {
     DecodedImage image;
     image.width = static_cast<uint32_t>(width);
@@ -107,7 +105,7 @@ DecodedImage packRGBA16F(float* pixels, int width, int height) {
     return image;
 }
 
-} // namespace
+}
 
 std::vector<std::byte> encodeTextureArtifact(const std::vector<std::byte>& pixels, uint32_t width,
         uint32_t height, rendering::TextureFormat format, bool generate_mipmaps) {
@@ -239,4 +237,4 @@ std::optional<rendering::TextureFormat> textureFormatFromName(std::string_view n
     return std::nullopt;
 }
 
-} // namespace arti::engine::asset::detail
+}

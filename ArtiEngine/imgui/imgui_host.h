@@ -8,11 +8,11 @@ struct ImGuiContext;
 
 namespace arti::core {
 class Window;
-} // namespace arti::core
+}
 
 namespace arti::platform {
 class SDLWindow;
-} // namespace arti::platform
+}
 
 namespace arti::engine {
 
@@ -57,4 +57,4 @@ private:
     rendering::TextureHandle m_font_texture;
 };
 
-} // namespace arti::engine
+}

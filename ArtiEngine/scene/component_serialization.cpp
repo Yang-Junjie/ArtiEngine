@@ -47,7 +47,7 @@ void requireMap(const YAML::Node& node, const char* what) {
     }
 }
 
-} // namespace
+}
 
 YAML::Node MeshRendererSerialization::serialize(const MeshRendererComponent& component) const {
     YAML::Node node;
@@ -77,7 +77,6 @@ MeshRendererComponent MeshRendererSerialization::deserialize(const YAML::Node& n
         }
     }
 
-    // 旧场景里的 SubmeshIndex 直接忽略：现在一个组件画所有 submesh，这个字段没有对应物了。
     if (node["Visible"]) {
         component.visible = node["Visible"].as<bool>();
     }
@@ -178,4 +177,4 @@ void registerSceneSerialization(scene::SceneSerializationRegistry& registry) {
             std::make_unique<EnvironmentSerialization>());
 }
 
-} // namespace arti::engine
+}

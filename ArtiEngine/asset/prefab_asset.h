@@ -36,4 +36,4 @@ private:
     std::vector<PrefabNode> m_nodes;
 };
 
-} // namespace arti::engine::asset
+}

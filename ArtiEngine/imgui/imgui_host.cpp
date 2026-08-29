@@ -22,7 +22,7 @@ platform::SDLWindow& requireSDLWindow(core::Window& window) {
     return *sdl_window;
 }
 
-} // namespace
+}
 
 ImGuiHost::ImGuiHost(core::Window& window, rendering::Renderer& renderer,
         const ImGuiHostCreateInfo& create_info)
@@ -175,4 +175,4 @@ bool ImGuiHost::wantsTextInput() const noexcept {
     return ImGui::GetIO().WantTextInput;
 }
 
-} // namespace arti::engine
+}

@@ -9,8 +9,6 @@
 namespace arti::engine::asset {
 namespace {
 
-// 属性优先于 artifact 头里的值：.meta 里手改 format / generate_mipmaps
-// （比如把法线贴图改成 RGBA8Unorm）不用重导就生效。
 std::optional<rendering::TextureFormat> formatFromProperties(
         const std::unordered_map<std::string, arti::asset::Value>& properties) {
     const auto found = properties.find("format");
@@ -36,7 +34,7 @@ std::optional<bool> mipmapsFromProperties(
     return std::nullopt;
 }
 
-} // namespace
+}
 
 arti::asset::AssetType TextureLoader::getType() const {
     return std::string{ kTextureAssetType };
@@ -60,4 +58,4 @@ std::shared_ptr<arti::asset::Asset> TextureLoader::decode(
     return texture;
 }
 
-} // namespace arti::engine::asset
+}

@@ -13,4 +13,4 @@ private:
             std::span<const std::shared_ptr<arti::asset::Asset>> dependencies) override;
 };
 
-} // namespace arti::engine::asset
+}

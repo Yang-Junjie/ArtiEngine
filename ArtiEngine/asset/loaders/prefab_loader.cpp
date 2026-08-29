@@ -16,4 +16,4 @@ std::shared_ptr<arti::asset::Asset> PrefabLoader::decode(const arti::asset::Asse
     return detail::decodePrefabArtifact(metadata.handle, detail::readFileBinary(artifact_file));
 }
 
-} // namespace arti::engine::asset
+}

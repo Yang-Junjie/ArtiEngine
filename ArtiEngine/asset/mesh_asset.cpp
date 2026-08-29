@@ -25,4 +25,4 @@ rendering::Mesh MeshAsset::toRenderMesh() const {
     return mesh;
 }
 
-} // namespace arti::engine::asset
+}

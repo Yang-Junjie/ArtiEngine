@@ -1,0 +1,9 @@
+Project:
+  Name: projects
+  Version: 0.1.0
+  Author: Unknown
+  Description: An ArtiChoco project.
+  StartScene: Assets/Scenes/test.artiscene
+  LastOpenScene: Assets/Scenes/test.artiscene
+  AssetsPath: Assets
+  ArtifactsPath: Library/Artifacts

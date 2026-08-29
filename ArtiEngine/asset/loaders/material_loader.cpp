@@ -35,7 +35,7 @@ rendering::MaterialType materialTypeFromName(const std::string& name) {
     return rendering::MaterialType::BlinnPhong;
 }
 
-} // namespace
+}
 
 arti::asset::AssetType MaterialLoader::getType() const { return std::string{ kMaterialAssetType }; }
 
@@ -53,7 +53,6 @@ std::vector<std::byte> encodeMaterialArtifact(const MaterialAsset::Params& param
     node["Occlusion"] = params.occlusion_strength;
     node["Emissive"] = params.emissive_strength;
 
-    // 纹理槽只在有效时写出；缺字段的旧 artifact 读回时走默认值。
     if (params.base_color_texture.isValid()) {
         node["BaseColorTexture"] = params.base_color_texture.id().toString();
     }
@@ -82,15 +81,14 @@ std::vector<std::byte> encodeMaterialArtifact(const MaterialAsset::Params& param
 std::shared_ptr<arti::asset::Asset> MaterialLoader::decode(
         const arti::asset::AssetMetadata& metadata, const std::filesystem::path& artifact_file,
         std::span<const std::shared_ptr<arti::asset::Asset>> dependencies) {
-    // 纹理作为依赖会被 AssetManager 先加载好；这里只需把 UUID 从 artifact 里读回来，
-    // GPUAssetCache 会用同一个 UUID 命中已加载的 TextureAsset。
+    // TODO(patch): dependencies 被刻意忽略。纹理的 UUID 是从 artifact 里读回来的，
+    // GPUAssetCache 用同一个 UUID 命中已加载的 TextureAsset，所以这个参数在这里没有数据用途 ——
+    // 它只保证 AssetManager 的加载顺序和缓存失效传播。
     (void) dependencies;
 
     const YAML::Node node = YAML::Load(detail::readTextFile(artifact_file));
 
     MaterialAsset::Params params;
-    // 逐字段带默认值地读：缺字段用结构体的默认值，不整体失败 ——
-    // 这样以后加字段，旧 artifact 依然能读。
     if (node["Type"]) {
         params.type = materialTypeFromName(node["Type"].as<std::string>());
     }
@@ -114,7 +112,6 @@ std::shared_ptr<arti::asset::Asset> MaterialLoader::decode(
     if (node["Roughness"]) {
         params.roughness_strength = node["Roughness"].as<float>();
     }
-    // 缺字段时走结构体默认值，所以引入这两项之前的 artifact 读回来行为不变。
     if (node["Occlusion"]) {
         params.occlusion_strength = node["Occlusion"].as<float>();
     }
@@ -140,4 +137,4 @@ std::shared_ptr<arti::asset::Asset> MaterialLoader::decode(
     return std::make_shared<MaterialAsset>(metadata.handle, params);
 }
 
-} // namespace arti::engine::asset
+}

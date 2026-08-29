@@ -1,0 +1,9 @@
+Asset:
+  Handle: 04558c3107a9a876
+  Type: artiengine.asset.mesh
+  SourcePath: Model/DamagedHelmet/DamagedHelmet.gltf.mesh.0
+  ArtifactPath: Imported/04558c3107a9a876.artimesh
+  Properties:
+    {}
+  Dependencies:
+    []

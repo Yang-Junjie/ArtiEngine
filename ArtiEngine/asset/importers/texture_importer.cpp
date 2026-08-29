@@ -44,10 +44,8 @@ arti::asset::AssetImportResult TextureImporter::import(const std::filesystem::pa
         const auto file = resolveSourceFile(source_path);
         const bool is_hdr = file.extension() == ".hdr" || file.extension() == ".HDR";
 
-        // suffix 为空：一个源文件一个资产，identity 就是源路径本身。
         auto output = startOutput(source_path, "", kTextureAssetType, ".artitexture");
 
-        // HDR 图只可能是线性 16F；普通图默认 sRGB，但保留用户在 .meta 里改过的 format。
         const std::string format_name = is_hdr
                 ? std::string{ detail::textureFormatName(rendering::TextureFormat::RGBA16Float) }
                 : formatFromExistingMetadata(
@@ -59,7 +57,6 @@ arti::asset::AssetImportResult TextureImporter::import(const std::filesystem::pa
         const auto image = is_hdr ? detail::decodeImageRGBA16F(file)
                                   : detail::decodeImageFile(file);
 
-        // 属性都写进 .meta，重导时 format 之类的手改值能保留下来。
         output.metadata.properties["importer"] = std::string{ "artiengine.TextureImporter" };
         output.metadata.properties["width"] = static_cast<uint64_t>(image.width);
         output.metadata.properties["height"] = static_cast<uint64_t>(image.height);
@@ -67,7 +64,6 @@ arti::asset::AssetImportResult TextureImporter::import(const std::filesystem::pa
         output.metadata.properties["format"] = format_name;
         output.metadata.properties["flip_vertical"] = false;
         output.metadata.properties["generate_mipmaps"] = true;
-        // 采样配置（渲染器还没有消费，先写进 .meta 给编辑器用）。
         output.metadata.properties["filter"] = std::string{ "linear" };
         output.metadata.properties["address_u"] = std::string{ "repeat" };
         output.metadata.properties["address_v"] = std::string{ "repeat" };
@@ -83,4 +79,4 @@ arti::asset::AssetImportResult TextureImporter::import(const std::filesystem::pa
     return result;
 }
 
-} // namespace arti::engine::asset
+}

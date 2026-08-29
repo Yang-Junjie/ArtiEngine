@@ -29,4 +29,4 @@ rendering::TextureDesc TextureAsset::toTextureDesc(std::string debug_name) const
     return desc;
 }
 
-} // namespace arti::engine::asset
+}

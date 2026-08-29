@@ -44,20 +44,15 @@ MaterialAsset::Params paramsFromMtl(const tinyobj::material_t& material) {
                                         : rendering::MaterialType::BlinnPhong;
     params.base_color = { material.diffuse[0], material.diffuse[1], material.diffuse[2],
         material.dissolve };
-    // MTL 里 map_Kd 是**替换** Kd 而不是调制它，所以贴图完全接管漫反射时，导出器（Maya、
-    // 3ds Max）习惯把 Kd 写成 0 0 0。我们的着色是 base_color * base_color_texture，照抄这个
-    // 0 会让整个模型变纯黑，所以声明了漫反射贴图而 Kd 为黑时把系数抬回白色。
-    //
-    // 判断用 diffuse_texname 而不是贴图是否真的导入成功：文件缺失时材质会退回纯色，那种情况下
-    // 白色比黑色更容易看出问题。
+    // TODO(patch): MTL 的 map_Kd 语义是替换 Kd，而着色端做的是 base_color * texture。
+    // Maya / 3ds Max 在贴图接管漫反射时写 Kd 0 0 0，照抄会让模型全黑，所以这里抬回白色。
     if (!material.diffuse_texname.empty() && params.base_color.r == 0.0f &&
             params.base_color.g == 0.0f && params.base_color.b == 0.0f) {
         params.base_color = { 1.0f, 1.0f, 1.0f, params.base_color.a };
     }
     params.specular_color = { material.specular[0], material.specular[1], material.specular[2] };
-    // MTL 的 Ns 范围是 0..1000，我们的 shininess 就是半程向量的指数，语义相同，直接取。
-    // 阈值是 1 而不是 0：tinyobj 的 InitMaterial 在 MTL 没写 Ns 时把 shininess 填成 1，
-    // 按 > 0 判断的话 fallback 永远不会生效。代价是真写了 Ns 1 的材质也会被当成没写。
+    // TODO(patch): 阈值是 1 而不是 0，因为 tinyobj 的 InitMaterial 在 MTL 没写 Ns 时把
+    // shininess 填成 1，按 > 0 判断 fallback 永远进不去。代价是真写了 Ns 1 的材质被当成没写。
     params.shininess = material.shininess > 1.0f ? material.shininess : 32.0f;
     params.specular_strength = glm::length(
             glm::vec3{ material.specular[0], material.specular[1], material.specular[2] });
@@ -66,7 +61,6 @@ MaterialAsset::Params paramsFromMtl(const tinyobj::material_t& material) {
     return params;
 }
 
-// 顶点去重的 key。OBJ 的面索引是 (v, vn, vt) 三元组，同一个位置配不同法线要算不同顶点。
 struct VertexKey {
     int position{ -1 };
     int normal{ -1 };
@@ -77,7 +71,6 @@ struct VertexKey {
 
 struct VertexKeyHash {
     size_t operator()(const VertexKey& key) const noexcept {
-        // 三个 int 拼成一个 64 位再散列。索引值都远小于 2^21，所以不会互相污染。
         const uint64_t packed = (static_cast<uint64_t>(key.position + 1) << 42) ^
                                 (static_cast<uint64_t>(key.normal + 1) << 21) ^
                                 static_cast<uint64_t>(key.uv + 1);
@@ -93,7 +86,6 @@ glm::vec3 faceNormal(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c)
     return length > 0.0f ? normal / length : glm::vec3{ 0.0f, 1.0f, 0.0f };
 }
 
-// 从法线现造一组正交切线。OBJ 不带切线数据，而法线贴图需要它。
 void makeTangentBasis(const glm::vec3& normal, glm::vec3& tangent, glm::vec3& bitangent) {
     const glm::vec3 reference = std::abs(normal.y) < 0.99f ? glm::vec3{ 0.0f, 1.0f, 0.0f }
                                                            : glm::vec3{ 1.0f, 0.0f, 0.0f };
@@ -109,8 +101,6 @@ ParsedMesh buildMesh(const tinyobj::attrib_t& attrib, const tinyobj::shape_t& sh
     const auto& mesh_indices = shape.mesh.indices;
     const auto& material_ids = shape.mesh.material_ids;
 
-    // 按材质分段。OBJ 的面已经按 usemtl 聚在一起（tinyobj 保持文件顺序），所以扫一遍
-    // 遇到材质变化就开新段即可，不用先排序。
     int current_material = -2;
     for (size_t face = 0; face * 3 < mesh_indices.size(); ++face) {
         const int material_id =
@@ -123,7 +113,6 @@ ParsedMesh buildMesh(const tinyobj::attrib_t& attrib, const tinyobj::shape_t& sh
             current_material = material_id;
         }
 
-        // 三角形的三个角。tinyobj 已经做过三角化（triangulate=true）。
         std::array<glm::vec3, 3> positions{};
         std::array<VertexKey, 3> keys{};
         for (int corner = 0; corner < 3; ++corner) {
@@ -135,8 +124,6 @@ ParsedMesh buildMesh(const tinyobj::attrib_t& attrib, const tinyobj::shape_t& sh
                 attrib.vertices[3 * index.vertex_index + 2] };
         }
 
-        // 没有法线数据时按面算一个。这时不能共享顶点（相邻面法线不同），
-        // 所以 key 里的 normal_index 是 -1，去重只在同一个面内生效。
         const bool has_normals = keys[0].normal >= 0;
         const glm::vec3 computed_normal =
                 has_normals ? glm::vec3{ 0.0f }
@@ -158,7 +145,6 @@ ParsedMesh buildMesh(const tinyobj::attrib_t& attrib, const tinyobj::shape_t& sh
                               attrib.normals[3 * key.normal + 2] }
                         : computed_normal;
                 if (key.uv >= 0) {
-                    // OBJ 的 V 轴朝上，我们的纹理坐标原点在左上，所以翻一下。
                     vertex.uv = { attrib.texcoords[2 * key.uv + 0],
                         1.0f - attrib.texcoords[2 * key.uv + 1] };
                 }
@@ -183,7 +169,7 @@ ParsedMesh buildMesh(const tinyobj::attrib_t& attrib, const tinyobj::shape_t& sh
     return mesh;
 }
 
-} // namespace
+}
 
 std::vector<std::string> ObjImporter::getSupportedExtensions() const {
     return { ".obj" };
@@ -191,7 +177,6 @@ std::vector<std::string> ObjImporter::getSupportedExtensions() const {
 
 std::vector<std::byte> ObjImporter::encode(const arti::asset::AssetMetadata&,
         const std::filesystem::path&) const {
-    // import() 直接产出每个子资产的字节，不走这条单资产的路径。
     throw std::logic_error("ObjImporter produces artifacts directly in import().");
 }
 
@@ -202,7 +187,6 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
 
         tinyobj::ObjReaderConfig config;
         config.triangulate = true;
-        // MTL 和 .obj 同目录，tinyobj 靠这个找 mtllib 引用的文件。
         config.mtl_search_path = file.parent_path().string();
 
         tinyobj::ObjReader reader;
@@ -220,7 +204,6 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
             return result;
         }
 
-        // 一张贴图在 MTL 里可能被多个材质引用，所以按相对路径去重，一个文件只导一次。
         std::unordered_map<std::string, core::UUID> texture_handles;
         const auto importTexture = [&](const std::string& texname,
                                             rendering::TextureFormat format) -> core::UUID {
@@ -235,7 +218,6 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
             const auto texture_file = file.parent_path() / texname;
             std::error_code error;
             if (!std::filesystem::is_regular_file(texture_file, error)) {
-                // 贴图缺失不让整个导入失败：材质会退回到纯色，模型仍然能用。
                 return {};
             }
 
@@ -251,8 +233,6 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
             return handle;
         };
 
-        // 材质。base_color 贴图是 sRGB，其余是线性 —— 这个区分只有在知道贴图用途时才做得对，
-        // 而 MTL 的字段名正好说明了用途。
         std::vector<core::UUID> material_handles;
         material_handles.reserve(materials.size());
         for (size_t index = 0; index < materials.size(); ++index) {
@@ -271,22 +251,20 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
                     rendering::TextureFormat::RGBA8Unorm);
             const core::UUID metallic = importTexture(material.metallic_texname,
                     rendering::TextureFormat::RGBA8Unorm);
-            // MTL 的 map_Ka 是环境光贴图，tinyobj 说它同时也当 AO 用，填进 occlusion 槽。
             const core::UUID occlusion = importTexture(material.ambient_texname,
                     rendering::TextureFormat::RGBA8Unorm);
             const core::UUID emissive = importTexture(material.emissive_texname,
                     rendering::TextureFormat::RGBA8Srgb);
 
-            // 槽位和 rendering::Material 一一对应。MTL 把 roughness 和 metallic 分开存，
-            // 渲染端只有一个合并槽，优先放 roughness，没有时退回 metallic。
             params.base_color_texture = TextureAssetHandle{ base_color };
             params.normal_texture = TextureAssetHandle{ normal };
+            // TODO(patch): MTL 把 roughness 和 metallic 分成两张图，渲染端只有一个合并槽
+            // （G=roughness、B=metallic 的 glTF 约定），所以只能二选一。两张都有时会丢一张。
             params.metallic_roughness_texture =
                     TextureAssetHandle{ roughness.isValid() ? roughness : metallic };
             params.occlusion_texture = TextureAssetHandle{ occlusion };
             params.emissive_texture = TextureAssetHandle{ emissive };
 
-            // 贴图作为依赖写进 .meta，AssetManager::load 会先把它们加载好再解码材质。
             for (const core::UUID texture:
                     { base_color, normal, roughness, metallic, occlusion, emissive }) {
                 if (texture.isValid()) {
@@ -299,7 +277,6 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
             result.outputs.push_back(std::move(output));
         }
 
-        // 网格。一个 shape 一个 MeshAsset，submesh 按材质分段。
         std::vector<core::UUID> mesh_handles;
         std::vector<std::vector<core::UUID>> mesh_materials;
         mesh_handles.reserve(shapes.size());
@@ -344,8 +321,6 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
             return result;
         }
 
-        // Prefab：把这些网格摆成一棵树，导入后能一次拖进场景。
-        // OBJ 没有节点层级，所以是一层根节点加上每个 shape 一个子节点。
         auto prefab_output = startOutput(source_path, ".prefab", kPrefabAssetType, ".artiprefab");
         std::vector<PrefabNode> nodes;
         nodes.reserve(mesh_handles.size() + 1);
@@ -378,4 +353,4 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
     return result;
 }
 
-} // namespace arti::engine::asset
+}

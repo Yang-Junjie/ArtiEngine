@@ -6,10 +6,9 @@
 namespace arti::engine::asset::detail {
 namespace {
 
-// magic(4) + version(4) + 四个 count(4 each) = 24
 constexpr size_t kHeaderSize = 24;
 
-} // namespace
+}
 
 std::vector<std::byte> encodeMeshArtifact(const std::vector<rendering::MeshVertex>& vertices,
         const std::vector<uint32_t>& indices, const std::vector<rendering::Submesh>& submeshes,
@@ -26,7 +25,6 @@ std::vector<std::byte> encodeMeshArtifact(const std::vector<rendering::MeshVerte
     writeU32(stream, static_cast<uint32_t>(submeshes.size()));
     writeU32(stream, static_cast<uint32_t>(material_slots.size()));
 
-    // 顶点和 submesh 按内存布局整块写。头里的 static_assert 盯着布局不变。
     stream.write(reinterpret_cast<const char*>(vertices.data()),
             static_cast<std::streamsize>(vertices.size() * sizeof(rendering::MeshVertex)));
     for (const uint32_t index: indices) {
@@ -35,7 +33,6 @@ std::vector<std::byte> encodeMeshArtifact(const std::vector<rendering::MeshVerte
     stream.write(reinterpret_cast<const char*>(submeshes.data()),
             static_cast<std::streamsize>(submeshes.size() * sizeof(rendering::Submesh)));
 
-    // 槽名是变长的，所以每个前面带长度。
     for (const std::string& slot: material_slots) {
         writeU32(stream, static_cast<uint32_t>(slot.size()));
         stream.write(slot.data(), static_cast<std::streamsize>(slot.size()));
@@ -103,7 +100,6 @@ std::shared_ptr<MeshAsset> decodeMeshArtifact(core::UUID handle,
         material_slots.push_back(std::move(slot));
     }
 
-    // 包围盒不存进 artifact：它是顶点的函数，存了就多一份可能对不上的真值。
     rendering::AABB bounds;
     for (const auto& vertex: vertices) {
         bounds.expand(vertex.position);
@@ -113,4 +109,4 @@ std::shared_ptr<MeshAsset> decodeMeshArtifact(core::UUID handle,
             std::move(submeshes), std::move(material_slots), bounds);
 }
 
-} // namespace arti::engine::asset::detail
+}

@@ -1,0 +1,9 @@
+Asset:
+  Handle: 325023d2d74b7afb
+  Type: artiengine.asset.mesh
+  SourcePath: Model/mitsuba-sphere.obj.mesh.0
+  ArtifactPath: Imported/325023d2d74b7afb.artimesh
+  Properties:
+    {}
+  Dependencies:
+    []

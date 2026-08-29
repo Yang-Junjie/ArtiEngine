@@ -1,0 +1,9 @@
+Asset:
+  Handle: cc072a09a5113f60
+  Type: artiengine.asset.texture
+  SourcePath: Model/DamagedHelmet/DamagedHelmet.gltf.texture.Default_metalRoughness.jpg
+  ArtifactPath: Imported/cc072a09a5113f60.artitexture
+  Properties:
+    {}
+  Dependencies:
+    []

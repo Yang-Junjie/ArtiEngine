@@ -23,7 +23,6 @@ rendering::MeshHandle GPUAssetCache::meshHandle(core::UUID asset) {
 
     const auto mesh_asset = m_assets->load<MeshAsset>(asset);
     if (!mesh_asset) {
-        // AssetManager 已经记了具体原因的日志，这里只标记别再重试。
         m_failed.emplace(asset, true);
         return {};
     }
@@ -49,8 +48,6 @@ rendering::MaterialHandle GPUAssetCache::materialHandle(core::UUID asset) {
     }
 
     rendering::Material material = material_asset->toRenderMaterial();
-    // 材质引用的纹理解析成渲染期的 TextureHandle。没设纹理的槽是空句柄，
-    // 渲染时由 Renderer 回落到内置白色贴图。
     const auto& params = material_asset->params();
     material.base_color_texture = textureHandle(params.base_color_texture.id());
     material.metallic_roughness_texture = textureHandle(params.metallic_roughness_texture.id());
@@ -96,8 +93,7 @@ void GPUAssetCache::clear() {
     m_meshes.clear();
     m_materials.clear();
     m_textures.clear();
-    // 失败记录也清掉：换项目之后同一个 UUID 可能是另一个资产，而且值得重试一次。
     m_failed.clear();
 }
 
-} // namespace arti::engine::asset
+}

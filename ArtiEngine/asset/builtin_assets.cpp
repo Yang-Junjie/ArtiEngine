@@ -12,8 +12,6 @@
 namespace arti::engine::asset {
 namespace {
 
-// 立方体：每个面 4 个顶点，方便给独立的法线和 UV。
-// 三角形按「从外面看逆时针」编写，与 ArtiRenderer 的 opaque pass 的正面约定一致。
 struct CubeGeometry {
     std::vector<rendering::MeshVertex> vertices;
     std::vector<uint32_t> indices;
@@ -68,7 +66,6 @@ CubeGeometry makeCube() {
     return cube;
 }
 
-// 写一份内置资产：artifact + .meta + 进 catalog。
 bool writeBuiltin(arti::asset::AssetManager& assets, core::UUID handle, std::string_view type,
         const std::filesystem::path& source_path, const std::filesystem::path& artifact_path,
         const std::vector<std::byte>& artifact) {
@@ -79,8 +76,6 @@ bool writeBuiltin(arti::asset::AssetManager& assets, core::UUID handle, std::str
     arti::asset::AssetMetadata metadata;
     metadata.handle = handle;
     metadata.type = std::string{ type };
-    // source_path 是合成的，磁盘上没有这个文件。isSafeAssetRelativePath 只校验路径形状
-    // （不是绝对路径、不含 ..），不要求存在，所以这样是合法的。
     metadata.source_path = source_path;
     metadata.artifact_path = artifact_path;
 
@@ -91,10 +86,9 @@ bool writeBuiltin(arti::asset::AssetManager& assets, core::UUID handle, std::str
     return true;
 }
 
-} // namespace
+}
 
 bool ensureBuiltinAssets(arti::asset::AssetManager& assets) {
-    // 幂等：catalog 里已经有就不重写。打开项目时 scanMetadata 会把上次写的读回来。
     const bool cube_present = assets.catalog().find(kBuiltinCubeMesh).has_value();
     const bool material_present = assets.catalog().find(kBuiltinDefaultMaterial).has_value();
     const bool pbr_present = assets.catalog().find(kBuiltinPbrMaterial).has_value();
@@ -106,7 +100,6 @@ bool ensureBuiltinAssets(arti::asset::AssetManager& assets) {
 
     if (!cube_present) {
         const auto cube = makeCube();
-        // 一个 submesh 覆盖整个网格，槽名 "Default"。
         std::vector<rendering::Submesh> submeshes;
         rendering::Submesh submesh;
         submesh.index_offset = 0;
@@ -134,9 +127,9 @@ bool ensureBuiltinAssets(arti::asset::AssetManager& assets) {
     if (!pbr_present) {
         MaterialAsset::Params params;
         params.type = rendering::MaterialType::PBR;
-        // 一块中等粗糙的白色介质。metallic 留 0：金属在没有 IBL 的时候只有环境项那一点点
-        // 镜面，看起来像坏的，不适合当默认值。
         params.roughness_strength = 0.5f;
+        // TODO(patch): metallic 定成 0 的原始理由是「没有 IBL 时金属只有常数环境项、
+        // 看起来像坏的」。IBL 已经落地，这个理由不再成立 —— 可以调成金属看实际效果了。
         params.metallic_strength = 0.0f;
         const auto artifact = encodeMaterialArtifact(params);
         ok = writeBuiltin(assets, kBuiltinPbrMaterial, kMaterialAssetType,
@@ -148,4 +141,4 @@ bool ensureBuiltinAssets(arti::asset::AssetManager& assets) {
     return ok;
 }
 
-} // namespace arti::engine::asset
+}

@@ -1,0 +1,9 @@
+Asset:
+  Handle: f27e073e5be06859
+  Type: artiengine.asset.texture
+  SourcePath: Model/DamagedHelmet/DamagedHelmet.gltf.texture.Default_normal.jpg
+  ArtifactPath: Imported/f27e073e5be06859.artitexture
+  Properties:
+    {}
+  Dependencies:
+    []

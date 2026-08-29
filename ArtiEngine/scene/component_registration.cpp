@@ -17,4 +17,4 @@ void registerSceneComponents(arti::scene::SceneSerializationRegistry* registry) 
     }
 }
 
-} // namespace arti::engine
+}

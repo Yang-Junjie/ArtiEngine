@@ -101,4 +101,4 @@ inline std::vector<std::byte> readFileBinary(const std::filesystem::path& path) 
     return bytes;
 }
 
-} // namespace arti::engine::asset::detail
+}

@@ -49,7 +49,7 @@ glm::mat4 readMatrix(const YAML::Node& node) {
     return matrix;
 }
 
-} // namespace
+}
 
 std::vector<std::byte> encodePrefabArtifact(const std::vector<PrefabNode>& nodes) {
     YAML::Node root;
@@ -116,8 +116,7 @@ std::shared_ptr<PrefabAsset> decodePrefabArtifact(core::UUID handle,
         nodes.push_back(std::move(node));
     }
 
-    // PrefabAsset 的构造会校验拓扑有序，坏的 artifact 在这里就抛。
     return std::make_shared<PrefabAsset>(handle, std::move(nodes));
 }
 
-} // namespace arti::engine::asset::detail
+}

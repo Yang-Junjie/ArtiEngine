@@ -17,7 +17,7 @@ glm::vec3 forwardOf(const glm::mat4& world) noexcept {
     return length > 0.0f ? forward / length : glm::vec3{ 0.0f, -1.0f, 0.0f };
 }
 
-} // namespace
+}
 
 const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         asset::GPUAssetCache& assets, const rendering::Renderer& renderer, ExtractTarget target) {
@@ -60,9 +60,6 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         m_render_scene.lights.push_back(desc);
     }
 
-    // 环境光照只取第一个：「环境」是唯一的那个背景，不像灯光是个列表。没有这个组件时
-    // 保持 EnvironmentDesc 的默认值 —— 那个默认正好等于引入组件之前 pass 里硬编码的环境光，
-    // 所以旧场景的观感不变。
     for (const auto [entity, environment]: scene.view<EnvironmentComponent>().each()) {
         rendering::EnvironmentDesc desc;
         desc.equirectangular_texture = assets.textureHandle(environment.equirect_texture.id());
@@ -81,29 +78,19 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
             continue;
         }
 
-
         const auto mesh = assets.meshHandle(mesh_renderer.mesh.id());
         if (!mesh.isValid()) {
             continue;
         }
 
         const rendering::MeshInfo info = meshInfo(renderer, mesh);
-        // 一个 MeshRendererComponent 画整个网格：每个 submesh 一个 draw。这是 materials 是
-        // 数组而不是单个句柄的原因 —— 下标就是槽位。
-        //
-        // 所有 draw 共用同一个 picking_id：submesh 是网格的内部结构、不是场景里的东西，
-        // 点到哪一段都应该选中这个实体。
         const uint32_t picking_id = pickingIdFor(id.id);
-        // MeshInfo::bounds 是整个网格的盒子而不是单个 submesh 的（见 mesh.h 的说明），
-        // 所以同一个网格的所有 submesh 共用它。对视锥剔除是偏保守的方向：宁可多画不能漏画。
         const rendering::AABB bounds = info.bounds.transformed(world.world);
 
         for (uint32_t submesh = 0; submesh < info.submesh_count; ++submesh) {
             rendering::DrawItem draw;
             draw.mesh = mesh;
             draw.submesh_index = submesh;
-            // 数组比槽位短或者那一项无效时留空句柄 —— 资源注册表会回退到默认材质，
-            // 而不是整个不画。
             if (submesh < mesh_renderer.materials.size()) {
                 draw.material = assets.materialHandle(mesh_renderer.materials[submesh].id());
             }
@@ -147,4 +134,4 @@ rendering::MeshInfo RenderSceneExtractor::meshInfo(const rendering::Renderer& re
     return cached->second;
 }
 
-} // namespace arti::engine
+}

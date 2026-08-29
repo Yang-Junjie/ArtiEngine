@@ -1,0 +1,9 @@
+Asset:
+  Handle: 8eb73a62a9b0ec0a
+  Type: artiengine.asset.texture
+  SourcePath: Model/DamagedHelmet/DamagedHelmet.gltf.texture.Default_AO.jpg
+  ArtifactPath: Imported/8eb73a62a9b0ec0a.artitexture
+  Properties:
+    {}
+  Dependencies:
+    []

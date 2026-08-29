@@ -35,4 +35,4 @@ private:
     rendering::AABB m_bounds;
 };
 
-} // namespace arti::engine::asset
+}

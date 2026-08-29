@@ -1,0 +1,9 @@
+Asset:
+  Handle: b0117e1000000001
+  Type: artiengine.asset.mesh
+  SourcePath: Builtin/Cube.mesh
+  ArtifactPath: Builtin/Cube.mesh
+  Properties:
+    {}
+  Dependencies:
+    []

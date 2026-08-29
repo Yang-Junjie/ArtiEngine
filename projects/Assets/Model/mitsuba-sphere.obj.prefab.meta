@@ -1,0 +1,12 @@
+Asset:
+  Handle: e321271ae1922c4f
+  Type: artiengine.asset.prefab
+  SourcePath: Model/mitsuba-sphere.obj.prefab
+  ArtifactPath: Imported/e321271ae1922c4f.artiprefab
+  Properties:
+    {}
+  Dependencies:
+    - 325023d2d74b7afb
+    - 456be533f96955cb
+    - 9acd839176fec0b3
+    - 036f5d8cc9386976

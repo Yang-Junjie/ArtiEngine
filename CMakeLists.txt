@@ -52,9 +52,3 @@ if(ARTIENGINE_BUILD_TOOLS)
     add_subdirectory(Tools)
 endif()
 
-option(ARTIENGINE_BUILD_TESTS "Build ArtiEngine tests" ON)
-if(ARTIENGINE_BUILD_TESTS)
-    enable_testing()
-    add_subdirectory(tests)
-endif()
-

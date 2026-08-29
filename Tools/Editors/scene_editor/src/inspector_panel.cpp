@@ -1,6 +1,9 @@
 #include "inspector_panel.h"
 
-#include "arti_engine.h"
+#include "scene/component_registration.h"
+#include "scene/component_serialization.h"
+#include "scene/components.h"
+#include "scene/render_scene_extractor.h"
 #include "artichoco/scene/entity.h"
 #include "artichoco/scene/scene.h"
 

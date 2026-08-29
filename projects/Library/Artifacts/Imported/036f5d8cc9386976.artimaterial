@@ -1,0 +1,16 @@
+Type: BlinnPhong
+BaseColor:
+  - 0.486
+  - 0.631
+  - 0.663
+  - 1
+SpecularColor:
+  - 0.7
+  - 0.7
+  - 0.7
+SpecularStrength: 1.2124355
+Shininess: 32
+Metallic: 0
+Roughness: 1
+Occlusion: 1
+Emissive: 0

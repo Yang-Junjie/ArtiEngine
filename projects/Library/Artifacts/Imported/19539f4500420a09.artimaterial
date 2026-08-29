@@ -1,0 +1,21 @@
+Type: PBR
+BaseColor:
+  - 1
+  - 1
+  - 1
+  - 1
+SpecularColor:
+  - 1
+  - 1
+  - 1
+SpecularStrength: 0.5
+Shininess: 32
+Metallic: 1
+Roughness: 1
+Occlusion: 1
+Emissive: 1
+BaseColorTexture: a390b8fae2b7892d
+MetallicRoughnessTexture: cc072a09a5113f60
+NormalTexture: f27e073e5be06859
+OcclusionTexture: 8eb73a62a9b0ec0a
+EmissiveTexture: fb8ca731d457424b

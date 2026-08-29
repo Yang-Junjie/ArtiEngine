@@ -1,0 +1,10 @@
+Asset:
+  Handle: ef890ed1d48c91b9
+  Type: artiengine.asset.prefab
+  SourcePath: Model/DamagedHelmet/DamagedHelmet.gltf.prefab
+  ArtifactPath: Imported/ef890ed1d48c91b9.artiprefab
+  Properties:
+    {}
+  Dependencies:
+    - 04558c3107a9a876
+    - 19539f4500420a09

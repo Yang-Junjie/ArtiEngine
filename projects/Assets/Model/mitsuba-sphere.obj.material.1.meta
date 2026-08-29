@@ -1,0 +1,9 @@
+Asset:
+  Handle: 036f5d8cc9386976
+  Type: artiengine.asset.material
+  SourcePath: Model/mitsuba-sphere.obj.material.1
+  ArtifactPath: Imported/036f5d8cc9386976.artimaterial
+  Properties:
+    {}
+  Dependencies:
+    []

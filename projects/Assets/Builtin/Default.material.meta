@@ -1,0 +1,9 @@
+Asset:
+  Handle: b0117e1000000002
+  Type: artiengine.asset.material
+  SourcePath: Builtin/Default.material
+  ArtifactPath: Builtin/Default.material
+  Properties:
+    {}
+  Dependencies:
+    []

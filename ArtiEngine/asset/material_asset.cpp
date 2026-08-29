@@ -22,4 +22,4 @@ rendering::Material MaterialAsset::toRenderMaterial() const {
     return material;
 }
 
-} // namespace arti::engine::asset
+}

@@ -12,4 +12,4 @@ std::vector<std::byte> encodePrefabArtifact(const std::vector<PrefabNode>& nodes
 std::shared_ptr<PrefabAsset> decodePrefabArtifact(core::UUID handle,
         const std::vector<std::byte>& data);
 
-} // namespace arti::engine::asset::detail
+}

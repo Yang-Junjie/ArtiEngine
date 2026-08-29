@@ -23,7 +23,6 @@
 namespace arti::engine::asset::detail {
 namespace {
 
-// 退化判据。用于法线/切线的长度、UV 的行列式、节点矩阵的行列式。
 constexpr float kDegenerateEpsilon = 1e-8f;
 
 struct CgltfDeleter {
@@ -64,8 +63,6 @@ CgltfData openDocument(const std::filesystem::path& file) {
     }
     CgltfData data{ raw };
 
-    // buffer 一并加载：外部 .bin、GLB 的内嵌块、data URI 三种形态都由它统一处理，
-    // 后面读 accessor 时就不用再关心数据从哪来。
     result = cgltf_load_buffers(&options, data.get(), name.c_str());
     if (result != cgltf_result_success) {
         fail("load buffers for", file, result);
@@ -77,21 +74,16 @@ CgltfData openDocument(const std::filesystem::path& file) {
     return data;
 }
 
-// 子资产 suffix 会拼进 source_path，而 .meta 是按 source_path 落盘的 —— 键里带路径分隔符
-// 会让 .meta 跑到子目录里去。所以统一替换掉。
 std::string sanitizeKey(std::string key) {
     std::ranges::replace(key, '/', '_');
     std::ranges::replace(key, '\\', '_');
     return key;
 }
 
-// data URI 里 base64 载荷的解码。cgltf 只自动解 buffer 的 data URI，image 的不解 ——
-// image 那条它把整个 uri 字符串留给调用方。
 std::vector<std::byte> decodeDataUri(const char* uri) {
     const std::string_view text{ uri };
     const auto comma = text.find(',');
     if (comma == std::string_view::npos || text.find(";base64") == std::string_view::npos) {
-        // 非 base64 的 data URI（百分号编码的纯文本）在图片里不会出现，不值得支持。
         throw std::runtime_error("Only base64 data URIs are supported for glTF images.");
     }
     const std::string_view payload = text.substr(comma + 1);
@@ -115,10 +107,6 @@ std::vector<std::byte> decodeDataUri(const char* uri) {
     return bytes;
 }
 
-// 收集所有图片，按来源去重。返回值的下标就是 GltfMaterial 里那些 *_image 字段的取值。
-//
-// 三种来源：外部 URI、GLB 的 buffer view、base64 data URI。cgltf 已经把 buffer 都加载好了，
-// 所以后两种直接从内存拿。
 std::vector<GltfImage> collectImages(const cgltf_data& data,
         const std::filesystem::path& base_directory) {
     std::vector<GltfImage> images;
@@ -133,7 +121,6 @@ std::vector<GltfImage> collectImages(const cgltf_data& data,
                 image.key = sanitizeKey("image." + std::to_string(index));
                 image.bytes = decodeDataUri(source.uri);
             } else {
-                // URI 是百分号编码的，要先解开才是真的文件名。
                 std::string decoded{ source.uri };
                 decoded.resize(cgltf_decode_uri(decoded.data()));
                 const std::filesystem::path relative{ decoded };
@@ -141,7 +128,6 @@ std::vector<GltfImage> collectImages(const cgltf_data& data,
                 image.file = (base_directory / relative).lexically_normal();
             }
         } else if (source.buffer_view != nullptr) {
-            // GLB 的内嵌图片：数据在某个 buffer 的一段区间里。
             const cgltf_buffer_view& view = *source.buffer_view;
             if (view.buffer == nullptr || view.buffer->data == nullptr) {
                 throw std::runtime_error("A glTF image references an unloaded buffer.");
@@ -150,13 +136,9 @@ std::vector<GltfImage> collectImages(const cgltf_data& data,
             image.key = sanitizeKey("image." + std::to_string(index));
             image.bytes.assign(bytes, bytes + view.size);
         } else {
-            // 既没 URI 也没 buffer view 的 image 是合法但空的，跳过它 ——
-            // 引用它的材质槽会退化成纯色。
             continue;
         }
 
-        // 同一个文件被多个 image 条目引用时只留一份。glTF 里这种情况不算少见
-        // （不同 sampler 配同一张图），而重复导入等于把几 MB 的贴图存两遍。
         const auto existing = std::ranges::find_if(images, [&image](const GltfImage& other) {
             return !image.file.empty() ? other.file == image.file : other.key == image.key;
         });
@@ -168,14 +150,12 @@ std::vector<GltfImage> collectImages(const cgltf_data& data,
     return images;
 }
 
-// 某个纹理槽引用的图片在 images 里的下标。-1 表示槽位为空。
 int imageIndexOf(const cgltf_data& data, const std::vector<GltfImage>& images,
         const std::filesystem::path& base_directory, const cgltf_texture_view& view) {
     if (view.texture == nullptr) {
         return -1;
     }
     const cgltf_image* image = view.texture->image;
-    // basisu / webp 扩展把图片挂在别的字段上。我们不解码 KTX2，但至少 webp 能走 stb。
     if (image == nullptr && view.texture->has_webp) {
         image = view.texture->webp_image;
     }
@@ -183,7 +163,6 @@ int imageIndexOf(const cgltf_data& data, const std::vector<GltfImage>& images,
         return -1;
     }
 
-    // 用和 collectImages 完全一样的规则算出这张图的身份，再去列表里找。
     std::filesystem::path file;
     std::string key;
     if (image->uri != nullptr && image->uri[0] != '\0' &&
@@ -236,9 +215,9 @@ std::vector<GltfMaterial> extractMaterials(const cgltf_data& data,
             material.base_color_image = slot(pbr.base_color_texture);
             material.metallic_roughness_image = slot(pbr.metallic_roughness_texture);
         } else if (source.has_pbr_specular_glossiness) {
-            // KHR_materials_pbrSpecularGlossiness 已废弃。近似成 metallic-roughness：
-            // diffuse 当 base color，glossiness 反过来当 roughness，metallic 归 0。
-            // 不精确，但比整个材质变默认白色好。
+            // TODO(patch): KHR_materials_pbrSpecularGlossiness 已废弃，这里近似成
+            // metallic-roughness（diffuse 当 base color、glossiness 取反当 roughness、
+            // metallic 归 0）。不精确，但比让整个材质变默认白色好。
             const auto& sg = source.pbr_specular_glossiness;
             material.base_color = { sg.diffuse_factor[0], sg.diffuse_factor[1],
                 sg.diffuse_factor[2], sg.diffuse_factor[3] };
@@ -250,15 +229,13 @@ std::vector<GltfMaterial> extractMaterials(const cgltf_data& data,
         material.normal_image = slot(source.normal_texture);
         material.occlusion_image = slot(source.occlusion_texture);
         material.emissive_image = slot(source.emissive_texture);
-        // occlusionTexture.scale 在 glTF 里就是 AO 的强度。
         material.occlusion = source.occlusion_texture.texture != nullptr
                 ? source.occlusion_texture.scale
                 : 1.0f;
 
-        // **有损映射**：rendering::Material 的 emissive 只有一个标量强度，没有颜色。
-        // 这里取 emissiveFactor 的最大分量当强度，颜色的部分只能由 emissive 贴图带。
-        // 纯色自发光（有 factor 无贴图）因此会丢掉色相 —— 真要修得给 Material 加
-        // emissive_color 字段，那是渲染端的改动。
+        // TODO(patch): 有损映射。rendering::Material 的 emissive 只有标量强度、没有颜色，
+        // 所以取 emissiveFactor 的最大分量当强度，色相只能由 emissive 贴图带 ——
+        // 纯色自发光（有 factor 无贴图）会丢色。要修得给 Material 加 emissive_color。
         const float emissive_peak = std::max({ source.emissive_factor[0],
             source.emissive_factor[1], source.emissive_factor[2] });
         const float emissive_strength =
@@ -294,7 +271,6 @@ glm::vec4 readVec4(const cgltf_accessor& accessor, cgltf_size index) {
     return { value[0], value[1], value[2], value[3] };
 }
 
-// 从法线现造一条切线。UV 退化（三角形在 UV 空间面积为 0）时的兜底。
 glm::vec3 fallbackTangent(const glm::vec3& normal) {
     const glm::vec3 axis = std::fabs(normal.z) < 0.999f ? glm::vec3{ 0.0f, 0.0f, 1.0f }
                                                        : glm::vec3{ 0.0f, 1.0f, 0.0f };
@@ -309,7 +285,6 @@ void checkAccessor(const cgltf_accessor* accessor, cgltf_type type, cgltf_size c
     }
 }
 
-// 一个 primitive 追加成一段 submesh。顶点保持局部空间 —— 变换属于 PrefabNode。
 void appendPrimitive(GltfMesh& mesh, const cgltf_data& data, const cgltf_primitive& primitive) {
     if (primitive.type != cgltf_primitive_type_triangles) {
         throw std::runtime_error("Only triangle-list glTF primitives are supported.");
@@ -346,14 +321,11 @@ void appendPrimitive(GltfMesh& mesh, const cgltf_data& data, const cgltf_primiti
 
     const uint32_t vertex_offset = static_cast<uint32_t>(mesh.vertices.size());
     const size_t count = static_cast<size_t>(vertex_count);
-    // 哪些顶点的法线/切线是文件里带的。没带的要从三角形累加算出来，而带了的不能被覆盖。
     std::vector<bool> has_normal(count, false);
     std::vector<bool> has_tangent(count, false);
     std::vector<glm::vec3> normal_accum(count, glm::vec3{ 0.0f });
     std::vector<glm::vec3> tangent_accum(count, glm::vec3{ 0.0f });
     std::vector<glm::vec3> bitangent_accum(count, glm::vec3{ 0.0f });
-    // glTF 的 TANGENT 是 vec4，w 是副切线的手性。我们的 MeshVertex 存显式 bitangent，
-    // 所以 w 只在最后合成 bitangent 时用一次，不进顶点。
     std::vector<float> handedness(count, 1.0f);
 
     mesh.vertices.reserve(mesh.vertices.size() + count);
@@ -368,7 +340,6 @@ void appendPrimitive(GltfMesh& mesh, const cgltf_data& data, const cgltf_primiti
             }
         }
         if (texcoords != nullptr) {
-            // glTF 的 UV 原点已经在左上，和我们的约定一致 —— 不像 OBJ 需要翻 V。
             vertex.uv = readVec2(*texcoords, index);
         }
         if (tangents != nullptr) {
@@ -383,7 +354,6 @@ void appendPrimitive(GltfMesh& mesh, const cgltf_data& data, const cgltf_primiti
         mesh.vertices.push_back(vertex);
     }
 
-    // 索引。没有 indices 的 primitive 是顺序三角形列表。
     const cgltf_size index_count =
             primitive.indices == nullptr ? vertex_count : primitive.indices->count;
     if (index_count == 0 || index_count % 3 != 0 ||
@@ -407,8 +377,6 @@ void appendPrimitive(GltfMesh& mesh, const cgltf_data& data, const cgltf_primiti
         indices.push_back(static_cast<uint32_t>(value));
     }
 
-    // 逐三角形累加法线和切线基。切线用标准的 UV 梯度法：把 (edge1, edge2) 在 UV 上的
-    // 变化率解出来，得到沿 U 和沿 V 的世界方向。
     for (size_t triangle = 0; triangle + 2 < indices.size(); triangle += 3) {
         const uint32_t i0 = indices[triangle];
         const uint32_t i1 = indices[triangle + 1];
@@ -454,7 +422,6 @@ void appendPrimitive(GltfMesh& mesh, const cgltf_data& data, const cgltf_primiti
                     : glm::vec3{ 0.0f, 0.0f, 1.0f };
         }
 
-        // Gram-Schmidt：切线要正交于最终的法线，否则法线贴图会有剪切。
         glm::vec3 tangent = has_tangent[index] ? vertex.tangent : tangent_accum[index];
         tangent -= vertex.normal * glm::dot(vertex.normal, tangent);
         tangent = glm::length(tangent) > kDegenerateEpsilon ? glm::normalize(tangent)
@@ -462,7 +429,6 @@ void appendPrimitive(GltfMesh& mesh, const cgltf_data& data, const cgltf_primiti
 
         float sign = handedness[index];
         if (!has_tangent[index]) {
-            // 文件没给手性时从累加出来的副切线反推：cross(N, T) 和它同向就是 +1。
             sign = glm::dot(glm::cross(vertex.normal, tangent), bitangent_accum[index]) < 0.0f
                     ? -1.0f
                     : 1.0f;
@@ -474,16 +440,10 @@ void appendPrimitive(GltfMesh& mesh, const cgltf_data& data, const cgltf_primiti
     rendering::Submesh submesh;
     submesh.index_offset = static_cast<uint32_t>(mesh.indices.size());
     submesh.index_count = static_cast<uint32_t>(indices.size());
-    // vertex_offset / vertex_count 描述的是整个网格的顶点缓冲，不是这一段的 ——
-    // 和 ObjImporter 的约定一致。vertex_count 要等所有 primitive 都进来才知道，
-    // 所以在 parseMesh 的末尾统一回填。
     submesh.vertex_offset = 0;
     submesh.vertex_count = 0;
     submesh.material_index = static_cast<uint32_t>(mesh.submeshes.size());
 
-    // 索引是相对整个 mesh 的顶点缓冲的，所以要加上这个 primitive 的起始偏移。
-    // 不用 Submesh::vertex_offset 表达：drawIndexed 的 StartVertexLocation 对所有
-    // submesh 是同一个基址（0），逐段偏移只能烘进索引里。
     for (const uint32_t index: indices) {
         mesh.indices.push_back(index + vertex_offset);
     }
@@ -503,7 +463,6 @@ GltfMesh parseMesh(const cgltf_data& data, const cgltf_mesh& source, size_t mesh
     for (cgltf_size index = 0; index < source.primitives_count; ++index) {
         appendPrimitive(mesh, data, source.primitives[index]);
     }
-    // 回填：所有 submesh 共用同一个顶点缓冲，所以 vertex_count 是整个网格的。
     const auto total = static_cast<uint32_t>(mesh.vertices.size());
     for (auto& submesh: mesh.submeshes) {
         submesh.vertex_count = total;
@@ -511,18 +470,12 @@ GltfMesh parseMesh(const cgltf_data& data, const cgltf_mesh& source, size_t mesh
     return mesh;
 }
 
-// 节点树按**前序**展开：先 push 自己拿到下标，再拿那个下标当 parent 递归子节点。
-// 于是 parent 的下标必然小于自己，正好满足 PrefabAsset 的拓扑有序要求。
-//
-// （ArtiEngine-old 的等价函数是后序的，而且它记 children 索引时用的是递归**之前**的
-// nodes.size()，那个值指向的是最深的后代而不是那个孩子 —— 是个 bug，没有照搬。）
 void collectNodes(std::vector<GltfNode>& nodes, const cgltf_data& data, const cgltf_node& source,
         uint32_t parent) {
     GltfNode node;
     node.name = source.name != nullptr && source.name[0] != '\0'
             ? source.name
             : "node." + std::to_string(cgltf_node_index(&data, &source));
-    // cgltf_node_transform_local 统一处理 matrix 和 TRS 两种写法，不用自己判 has_matrix。
     std::array<cgltf_float, 16> local{};
     cgltf_node_transform_local(&source, local.data());
     node.local_transform = glm::make_mat4(local.data());
@@ -540,7 +493,7 @@ void collectNodes(std::vector<GltfNode>& nodes, const cgltf_data& data, const cg
     }
 }
 
-} // namespace
+}
 
 GltfScene parseGltf(const std::filesystem::path& source_file) {
     const CgltfData data = openDocument(source_file);
@@ -554,16 +507,12 @@ GltfScene parseGltf(const std::filesystem::path& source_file) {
     for (cgltf_size index = 0; index < data->meshes_count; ++index) {
         GltfMesh mesh = parseMesh(*data, data->meshes[index], index);
         if (mesh.vertices.empty() || mesh.indices.empty()) {
-            // 空 mesh 是合法的（比如只带 morph target 的占位）。留一个空槽位保持下标对齐 ——
-            // 节点是按 cgltf 的 mesh 序号引用的。
             scene.meshes.push_back(GltfMesh{ .name = std::move(mesh.name) });
             continue;
         }
         scene.meshes.push_back(std::move(mesh));
     }
 
-    // 默认场景优先；没有 scene 就拿所有根节点；连节点都没有就给每个 mesh 造一个。
-    // 最后那条是为了不丢几何 —— 有些工具导出的 glTF 只有 meshes 数组。
     const cgltf_scene* source_scene = data->scene;
     if (source_scene == nullptr && data->scenes_count > 0) {
         source_scene = &data->scenes[0];
@@ -598,4 +547,4 @@ GltfScene parseGltf(const std::filesystem::path& source_file) {
     return scene;
 }
 
-} // namespace arti::engine::asset::detail
+}

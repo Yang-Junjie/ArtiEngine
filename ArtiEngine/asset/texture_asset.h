@@ -34,4 +34,4 @@ private:
     bool m_generate_mipmaps{ true };
 };
 
-} // namespace arti::engine::asset
+}

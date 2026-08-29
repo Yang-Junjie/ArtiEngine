@@ -6,14 +6,13 @@
 
 namespace arti::asset {
 class AssetManager;
-} // namespace arti::asset
+}
 
 namespace arti::engine::asset {
 
 class MaterialAsset;
 class MeshAsset;
 class TextureAsset;
-
 
 class GPUAssetCache {
 public:
@@ -34,4 +33,4 @@ private:
     std::unordered_map<core::UUID, bool> m_failed;
 };
 
-} // namespace arti::engine::asset
+}

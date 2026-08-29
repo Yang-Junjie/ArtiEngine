@@ -1,0 +1,13 @@
+Asset:
+  Handle: 19539f4500420a09
+  Type: artiengine.asset.material
+  SourcePath: Model/DamagedHelmet/DamagedHelmet.gltf.material.0
+  ArtifactPath: Imported/19539f4500420a09.artimaterial
+  Properties:
+    {}
+  Dependencies:
+    - a390b8fae2b7892d
+    - cc072a09a5113f60
+    - f27e073e5be06859
+    - 8eb73a62a9b0ec0a
+    - fb8ca731d457424b

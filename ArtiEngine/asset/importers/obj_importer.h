@@ -14,4 +14,4 @@ private:
             const std::filesystem::path& source_path) const override;
 };
 
-} // namespace arti::engine::asset
+}
