@@ -7,12 +7,15 @@ class AssetManager;
 
 namespace arti::engine::asset {
 
-// 内置资产：立方体网格和默认材质。
+// 内置资产：立方体网格、默认材质（Blinn-Phong）和一个 PBR 材质。
 //
 // UUID 写死，所以场景里存下的引用在任何项目、任何机器上都指向同一个东西。
 // 值是任意选的常量，只要够随机不会和 UUID::generate() 撞就行。
 inline constexpr core::UUID kBuiltinCubeMesh{ 0xB0117E1000000001ULL };
 inline constexpr core::UUID kBuiltinDefaultMaterial{ 0xB0117E1000000002ULL };
+// 中等粗糙度的介质。在 glTF importer 落地之前，这是唯一能拿到 MaterialType::PBR
+// 材质的途径 —— 没有它，PbrOpaquePass 在编辑器里根本不会被触发到。
+inline constexpr core::UUID kBuiltinPbrMaterial{ 0xB0117E1000000003ULL };
 
 // 把内置资产写成项目里真实的 .meta + artifact，然后注册进 catalog。
 //

@@ -97,7 +97,8 @@ bool ensureBuiltinAssets(arti::asset::AssetManager& assets) {
     // 幂等：catalog 里已经有就不重写。打开项目时 scanMetadata 会把上次写的读回来。
     const bool cube_present = assets.catalog().find(kBuiltinCubeMesh).has_value();
     const bool material_present = assets.catalog().find(kBuiltinDefaultMaterial).has_value();
-    if (cube_present && material_present) {
+    const bool pbr_present = assets.catalog().find(kBuiltinPbrMaterial).has_value();
+    if (cube_present && material_present && pbr_present) {
         return true;
     }
 
@@ -127,6 +128,20 @@ bool ensureBuiltinAssets(arti::asset::AssetManager& assets) {
         ok = writeBuiltin(assets, kBuiltinDefaultMaterial, kMaterialAssetType,
                      "Builtin/Default.material",
                      std::filesystem::path{ "Builtin" } / "Default.material", artifact) &&
+             ok;
+    }
+
+    if (!pbr_present) {
+        MaterialAsset::Params params;
+        params.type = rendering::MaterialType::PBR;
+        // 一块中等粗糙的白色介质。metallic 留 0：金属在没有 IBL 的时候只有环境项那一点点
+        // 镜面，看起来像坏的，不适合当默认值。
+        params.roughness_strength = 0.5f;
+        params.metallic_strength = 0.0f;
+        const auto artifact = encodeMaterialArtifact(params);
+        ok = writeBuiltin(assets, kBuiltinPbrMaterial, kMaterialAssetType,
+                     "Builtin/DefaultPbr.material",
+                     std::filesystem::path{ "Builtin" } / "DefaultPbr.material", artifact) &&
              ok;
     }
 

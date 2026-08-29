@@ -535,6 +535,9 @@ void EditorLayer::createDefaultScene() {
     const arti::asset::AssetHandle<engine::asset::MaterialAsset> default_material{
         engine::asset::kBuiltinDefaultMaterial
     };
+    const arti::asset::AssetHandle<engine::asset::MaterialAsset> pbr_material{
+        engine::asset::kBuiltinPbrMaterial
+    };
 
     auto camera = m_scene->createEntity("Main Camera");
     camera.getComponent<scene::TransformComponent>().translation = glm::vec3{ 0.0f, 1.5f, 4.0f };
@@ -545,13 +548,15 @@ void EditorLayer::createDefaultScene() {
             glm::quat{ glm::vec3{ glm::radians(-50.0f), glm::radians(-30.0f), 0.0f } };
     sun.addComponent<engine::DirectionalLightComponent>();
 
+    // 中间那个用 PBR 材质，左右两个用默认的 Blinn-Phong。并排放是为了能直接比出两条 pass
+    // 的差别，也让 PbrOpaquePass 被 smoke 用例覆盖到 —— 否则那条路在自动化里一个 draw 都不会走。
     for (int index = -1; index <= 1; ++index) {
-        auto cube = m_scene->createEntity("Cube");
+        auto cube = m_scene->createEntity(index == 0 ? "Cube (PBR)" : "Cube");
         cube.getComponent<scene::TransformComponent>().translation =
                 glm::vec3{ static_cast<float>(index) * 1.6f, 0.0f, 0.0f };
         auto& mesh_renderer = cube.addComponent<engine::MeshRendererComponent>();
         mesh_renderer.mesh = cube_mesh;
-        mesh_renderer.materials.push_back(default_material);
+        mesh_renderer.materials.push_back(index == 0 ? pbr_material : default_material);
     }
 
     core::Application::get().getLogChannel().info("Created default scene");
