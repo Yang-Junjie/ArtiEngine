@@ -11,11 +11,8 @@ namespace arti::engine::asset {
 
 inline constexpr std::string_view kMaterialAssetType{ "artiengine.asset.material" };
 
-// 材质的**参数**。纹理还没做成资产，所以这一版没有纹理引用 ——
-// 加上去的时候走 AssetMetadata::dependencies，loader 会拿到已经加载好的 TextureAsset。
-//
-// 字段刻意对着 rendering::Material 摆：那边是渲染要的形状，这边是磁盘上的形状，
-// 两者一一对应，转换就不需要判断和映射表。
+class TextureAsset;
+
 class MaterialAsset final : public arti::asset::Asset {
 public:
     struct Params {
@@ -26,15 +23,21 @@ public:
         float shininess{ 32.0f };
         float metallic_strength{ 0.0f };
         float roughness_strength{ 1.0f };
+
+        // 纹理槽与 rendering::Material 一一对应。UUID 由 importer 在导入时填好，
+        // 序列化进 artifact，GPUAssetCache 负责解析成渲染期的 TextureHandle。
+        arti::asset::AssetHandle<TextureAsset> base_color_texture;
+        arti::asset::AssetHandle<TextureAsset> metallic_roughness_texture;
+        arti::asset::AssetHandle<TextureAsset> normal_texture;
+        arti::asset::AssetHandle<TextureAsset> occlusion_texture;
+        arti::asset::AssetHandle<TextureAsset> emissive_texture;
     };
 
     MaterialAsset(core::UUID handle, Params params);
 
     arti::asset::AssetType getType() const override;
-
     const Params& params() const noexcept { return m_params; }
-
-  
+    
     rendering::Material toRenderMaterial() const;
 
 private:

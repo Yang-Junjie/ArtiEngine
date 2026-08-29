@@ -11,7 +11,7 @@ class Scene;
 } // namespace arti::scene
 
 namespace arti::engine::asset {
-class GpuAssetCache;
+class GPUAssetCache;
 } // namespace arti::engine::asset
 
 namespace arti::engine {
@@ -22,9 +22,7 @@ struct ExtractTarget {
 };
 class RenderSceneExtractor {
 public:
-    // assets 把组件里的资产引用解析成 renderer 句柄；renderer 用来读网格的局部包围盒。
-    // 两个都传是因为职责不同：一个管「资产 -> GPU」，一个管「GPU 资源的属性」。
-    const rendering::RenderScene& extract(scene::Scene& scene, asset::GpuAssetCache& assets,
+    const rendering::RenderScene& extract(scene::Scene& scene, asset::GPUAssetCache& assets,
             const rendering::Renderer& renderer, ExtractTarget target);
 
     const rendering::RenderScene& renderScene() const noexcept { return m_render_scene; }
@@ -41,7 +39,6 @@ private:
     rendering::AABB worldBounds(const rendering::Renderer& renderer, rendering::MeshHandle mesh,
             const glm::mat4& world);
 
-    // 只增不复用：拾取读回是异步的，逐帧重编号会让晚几帧到的结果选中错的实体。
     uint32_t pickingIdFor(core::UUID entity);
 
     rendering::RenderScene m_render_scene;

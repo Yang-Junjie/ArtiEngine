@@ -18,3 +18,25 @@ target_include_directories(imguizmo SYSTEM PUBLIC
 target_link_libraries(imguizmo PUBLIC ImGui::Core)
 
 set_target_properties(imguizmo PROPERTIES FOLDER "ThirdParty")
+
+# tiny_obj_loader：单头文件的 OBJ + MTL 解析器。
+# 它同时暴露经典 MTL 字段（Kd/Ks/Ns）和 PBR 扩展（map_Pr/map_Pm/norm），
+# 所以 importer 能按哪套有值来定 MaterialType，不用猜着映射。
+#
+# 实现要在**一个**翻译单元里定义 TINYOBJLOADER_IMPLEMENTATION，所以给个 .cpp 而不是纯接口库。
+add_library(tinyobjloader STATIC
+    tiny_obj_loader/tiny_obj_loader.cpp
+)
+add_library(TinyObjLoader::TinyObjLoader ALIAS tinyobjloader)
+
+target_compile_features(tinyobjloader PUBLIC cxx_std_20)
+target_include_directories(tinyobjloader SYSTEM PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/tiny_obj_loader"
+)
+set_target_properties(tinyobjloader PROPERTIES FOLDER "ThirdParty")
+
+# stb_image：图片解码。源码在 ArtiChoco 的 third_party 下，但它自己不 add_subdirectory
+# （ArtiChoco 用不到），所以在这里挂进来。
+add_subdirectory("${ARTIENGINE_ARTIRENDERER_DIR}/ArtiChoco/third_party/stb"
+    "${CMAKE_CURRENT_BINARY_DIR}/stb" EXCLUDE_FROM_ALL)
+set_target_properties(stb PROPERTIES FOLDER "ThirdParty")

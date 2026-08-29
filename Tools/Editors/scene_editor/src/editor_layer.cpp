@@ -1,5 +1,6 @@
 #include "editor_layer.h"
 
+#include "content_browser_panel.h"
 #include "editor_camera.h"
 #include "editor_gizmo.h"
 #include "editor_project.h"
@@ -13,17 +14,23 @@
 #include "asset/gpu_asset_cache.h"
 #include "asset/material_asset.h"
 #include "asset/mesh_asset.h"
+#include "asset/prefab_asset.h"
 #include "imgui/imgui_host.h"
 
 #include "artichoco/core/application.h"
 #include "artichoco/platform/window/sdl_vulkan_surface_source.h"
+#include "artichoco/project/project_manager.h"
 #include "artichoco/renderer/render_device.h"
 #include "artichoco/scene/entity.h"
 #include "artichoco/scene/scene.h"
+#include "artichoco/scene/scene_serializer.h"
 
 #include <array>
 #include <cstddef>
+#include <cstring>
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 #include <imgui.h>
 #include <span>
 #include <utility>
@@ -83,16 +90,26 @@ rendering::Mesh makeCubeMesh() {
     return mesh;
 }
 
+// 子资产的 source_path 是「源文件 + 后缀链」（box.obj.mesh.0），实体名只要最前面的源文件名。
+std::string sourceStemName(const std::filesystem::path& source_path) {
+    std::string name = source_path.filename().string();
+    if (const auto dot = name.find('.'); dot != std::string::npos) {
+        name = name.substr(0, dot);
+    }
+    return name.empty() ? "Entity" : name;
+}
+
 } // namespace
 
 EditorLayer::EditorLayer(const char* scene_path, uint32_t frame_limit, bool auto_play,
-        bool auto_pick, bool auto_project)
+        bool auto_pick, bool auto_project, bool auto_scene_io)
         : Layer("EditorLayer"),
           m_scene_path(scene_path ? scene_path : ""),
           m_frame_limit(frame_limit),
           m_auto_play(auto_play),
           m_auto_pick(auto_pick),
-          m_auto_project(auto_project) {}
+          m_auto_project(auto_project),
+          m_auto_scene_io(auto_scene_io) {}
 
 EditorLayer::~EditorLayer() = default;
 
@@ -109,7 +126,11 @@ void EditorLayer::onAttach() {
     renderer_info.present = rendering::PresentMode::IntoUI;
     m_renderer = std::make_unique<rendering::Renderer>(*m_render_device, renderer_info);
 
-    engine::registerSceneComponents();
+    // 两张表一起注册：拷贝表给 Play/Stop 的快照用，序列化表给存读用。
+    // 漏任何一张都是静默丢组件，所以是同一个入口。
+    m_serialization = std::make_unique<scene::SceneSerializationRegistry>();
+    engine::registerSceneComponents(m_serialization.get());
+    m_serializer = std::make_unique<scene::SceneSerializer>(*m_serialization);
 
     m_scene = std::make_unique<scene::Scene>();
     m_snapshot = std::make_unique<scene::Scene>();
@@ -126,6 +147,7 @@ void EditorLayer::onAttach() {
     m_hierarchy_panel = std::make_unique<HierarchyPanel>(*m_scene);
     m_inspector_panel = std::make_unique<InspectorPanel>(*m_scene);
     m_viewport_panel = std::make_unique<ViewportPanel>(*m_renderer);
+    m_content_browser_panel = std::make_unique<ContentBrowserPanel>(*m_project);
 
     // 自动化跑时不能弹文件对话框，所以 --auto-project 在临时目录里开一个。
     // 和 --frames 分开是刻意的：没项目那条路必须能被自动化覆盖 ——
@@ -148,6 +170,7 @@ void EditorLayer::onDetach() {
     m_viewport_panel.reset();
     m_inspector_panel.reset();
     m_hierarchy_panel.reset();
+    m_content_browser_panel.reset();
     m_imgui.reset();
     m_gizmo.reset();
     m_editor_camera.reset();
@@ -168,6 +191,11 @@ void EditorLayer::onUpdate(core::Timestep deltaTime) {
             m_frame_index >= m_frame_limit / 2) {
         enterPlayMode();
     }
+    // 等几帧让资产加载和第一帧渲染完成，再做存读往返。
+    if (m_auto_scene_io && m_frame_index == 10 && m_project && m_project->isOpen()) {
+        runSceneIoCheck();
+    }
+
     if (m_frame_limit != 0 && m_frame_index >= m_frame_limit) {
         if (m_mode == Mode::Play) {
             exitPlayMode();
@@ -218,6 +246,7 @@ void EditorLayer::onImGuiRender() {
 
     m_hierarchy_panel->draw();
     m_inspector_panel->draw(m_hierarchy_panel->selectedEntity());
+    m_content_browser_panel->draw();
 
     const auto selected = m_hierarchy_panel->selectedEntity();
     const auto [width, height] = m_viewport_panel->draw([&](const ViewportPanel::ImageRect& rect) {
@@ -227,6 +256,8 @@ void EditorLayer::onImGuiRender() {
         m_gizmo->draw(*m_scene, selected, m_extractor->renderScene().view, rect.x, rect.y,
                 rect.width, rect.height);
     });
+    handleViewportAssetDrop(m_viewport_panel->imageRect().x, m_viewport_panel->imageRect().y,
+            m_viewport_panel->imageRect().width, m_viewport_panel->imageRect().height);
     m_viewport_width = width;
     m_viewport_height = height;
 
@@ -294,6 +325,175 @@ void EditorLayer::onRender() {
         core::Application::get().getLogChannel().info("First frame rendered ({} draw calls)",
                 statistics.draw_calls);
     }
+}
+
+void EditorLayer::runSceneIoCheck() {
+    const auto& log = core::Application::get().getLogChannel();
+    const auto root = m_project->rootPath();
+    if (!root) {
+        log.error("Scene IO check needs an open project");
+        return;
+    }
+    const auto path = *root / "SceneIoCheck.artiscene";
+
+    // 存之前先量一遍：实体数，以及三种组件各自的数量。
+    // 只比实体数不够 —— 组件漏注册时实体照样在，但组件没了。
+    const auto countComponents = [this]() {
+        struct Counts {
+            size_t entities{ 0 };
+            size_t mesh_renderers{ 0 };
+            size_t cameras{ 0 };
+            size_t lights{ 0 };
+        } counts;
+        for (auto [entity, id]: m_scene->view<scene::IDComponent>().each()) {
+            ++counts.entities;
+        }
+        for (auto [entity, c]: m_scene->view<engine::MeshRendererComponent>().each()) {
+            ++counts.mesh_renderers;
+        }
+        for (auto [entity, c]: m_scene->view<engine::CameraComponent>().each()) {
+            ++counts.cameras;
+        }
+        for (auto [entity, c]: m_scene->view<engine::DirectionalLightComponent>().each()) {
+            ++counts.lights;
+        }
+        return counts;
+    };
+
+    const auto before = countComponents();
+
+    // 也记一个具体的资产引用，验证 UUID 真的往返了而不只是组件数量对上。
+    core::UUID mesh_before;
+    for (auto [entity, mesh_renderer]: m_scene->view<engine::MeshRendererComponent>().each()) {
+        mesh_before = mesh_renderer.mesh.id();
+        break;
+    }
+
+    if (!saveScene(path)) {
+        log.error("Scene IO check: save failed");
+        return;
+    }
+
+    m_scene->clearEntities();
+    try {
+        m_serializer->load(path, *m_scene);
+    } catch (const std::exception& exception) {
+        log.error("Scene IO check: load failed: {}", exception.what());
+        return;
+    }
+
+    const auto after = countComponents();
+    core::UUID mesh_after;
+    for (auto [entity, mesh_renderer]: m_scene->view<engine::MeshRendererComponent>().each()) {
+        mesh_after = mesh_renderer.mesh.id();
+        break;
+    }
+
+    const bool match = before.entities == after.entities &&
+                       before.mesh_renderers == after.mesh_renderers &&
+                       before.cameras == after.cameras && before.lights == after.lights &&
+                       mesh_before == mesh_after && mesh_after.isValid();
+
+    log.info("Scene IO check: {} (entities {}->{}, mesh {}->{}, cam {}->{}, light {}->{}, "
+             "mesh asset {})",
+            match ? "round trip OK" : "MISMATCH", before.entities, after.entities,
+            before.mesh_renderers, after.mesh_renderers, before.cameras, after.cameras,
+            before.lights, after.lights, mesh_after == mesh_before ? "same" : "CHANGED");
+}
+
+void EditorLayer::resetSceneState() {
+    // Play 状态下换场景会让快照指向已经不存在的实体，所以先退回 Edit。
+    if (m_mode == Mode::Play) {
+        exitPlayMode();
+    }
+    m_scene->clearEntities();
+    m_hierarchy_panel->setSelectedEntity(std::nullopt);
+    m_scene_dirty = false;
+}
+
+void EditorLayer::newScene() {
+    resetSceneState();
+    m_scene_file.clear();
+    createDefaultScene();
+    core::Application::get().getLogChannel().info("New scene");
+}
+
+void EditorLayer::openScene() {
+    // 起始目录用项目根，这样对话框直接落在项目里而不是上次的随机位置。
+    const auto root = m_project->rootPath();
+    const auto file = FileDialogs::openFile("Arti Scene\0*.artiscene\0",
+            root ? root->string() : std::string{});
+    if (file.empty()) {
+        return;
+    }
+
+    resetSceneState();
+    try {
+        m_serializer->load(file, *m_scene);
+        m_scene_file = file;
+    } catch (const std::exception& exception) {
+        // 读失败不该让编辑器退出，但场景已经被 clearEntities 清了 —— 所以给个空场景，
+        // 而不是留下半个读进来的场景假装成功。
+        core::Application::get().getLogChannel().error("Failed to open scene: {}",
+                exception.what());
+        m_scene->clearEntities();
+        m_scene_file.clear();
+    }
+}
+
+bool EditorLayer::saveScene(const std::filesystem::path& path) {
+    if (path.empty()) {
+        saveSceneAs();
+        return !m_scene_file.empty();
+    }
+
+    try {
+        m_serializer->save(*m_scene, path);
+    } catch (const std::exception& exception) {
+        core::Application::get().getLogChannel().error("Failed to save scene: {}",
+                exception.what());
+        return false;
+    }
+
+    m_scene_file = path;
+    m_scene_dirty = false;
+
+    // 记进项目，下次打开能回到这个场景。ProjectInfo 里那两个字段是相对项目根的。
+    auto& projects = project::ProjectManager::instance();
+    if (const auto& info = projects.getProjectInfo(); info) {
+        if (const auto root = projects.getProjectRootPath()) {
+            std::error_code error;
+            const auto relative = std::filesystem::relative(path, *root, error);
+            // 场景存在项目外面时 relative 会带 ..，那种路径 ProjectManager 会拒，所以只在
+            // 确实位于项目内时才记。
+            if (!error && !relative.empty() &&
+                    relative.native().find(L"..") == std::wstring::npos) {
+                project::ProjectInfo updated = *info;
+                updated.last_open_scene = relative;
+                if (updated.start_scene.empty()) {
+                    updated.start_scene = relative;
+                }
+                projects.setProjectInfo(updated);
+                projects.saveProject();
+            }
+        }
+    }
+    return true;
+}
+
+void EditorLayer::saveSceneAs() {
+    const auto root = m_project->rootPath();
+    const auto file = FileDialogs::saveFile("Arti Scene\0*.artiscene\0",
+            root ? (*root / "Untitled.artiscene").string() : std::string{});
+    if (file.empty()) {
+        return;
+    }
+
+    auto with_extension = file;
+    if (!with_extension.has_extension()) {
+        with_extension.replace_extension(".artiscene");
+    }
+    saveScene(with_extension);
 }
 
 void EditorLayer::newProject() {
@@ -367,13 +567,21 @@ void EditorLayer::drawMenuBar() {
                 openProject();
             }
             ImGui::Separator();
-            // 场景的存读还没做 —— 需要先把组件注册进 SceneSerializationRegistry。
-            // 置灰而不是留空实现：点了没反应比点不动更难判断是「没做」还是「坏了」。
+            // 场景操作需要项目：场景里的资产 UUID 要在项目的 catalog 里查得到，
+            // 场景路径也要记进 ProjectInfo。没项目时置灰。
             const bool project_open = m_project && m_project->isOpen();
-            ImGui::MenuItem("New Scene", "Ctrl+N", false, false);
-            ImGui::MenuItem("Open Scene...", "Ctrl+O", false, false);
-            ImGui::MenuItem("Save Scene", "Ctrl+S", false, false);
-            (void) project_open;
+            if (ImGui::MenuItem("New Scene", "Ctrl+N", false, project_open)) {
+                newScene();
+            }
+            if (ImGui::MenuItem("Open Scene...", "Ctrl+O", false, project_open)) {
+                openScene();
+            }
+            if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, project_open)) {
+                saveScene(m_scene_file);
+            }
+            if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S", false, project_open)) {
+                saveSceneAs();
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit")) {
                 core::Application::get().close();
@@ -454,6 +662,109 @@ void EditorLayer::exitPlayMode() {
     m_mode = Mode::Edit;
 
     core::Application::get().getLogChannel().info("Returned to Edit mode (scene restored)");
+}
+
+void EditorLayer::handleViewportAssetDrop(float rect_x, float rect_y, float rect_width,
+        float rect_height) {
+    const ImVec2 mouse = ImGui::GetMousePos();
+    if (mouse.x < rect_x || mouse.x >= rect_x + rect_width || mouse.y < rect_y ||
+            mouse.y >= rect_y + rect_height) {
+        return;
+    }
+    if (!ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        return;
+    }
+    const auto* payload = ImGui::GetDragDropPayload();
+    if (payload == nullptr || !payload->IsDataType(ContentBrowserPanel::kAssetPayloadType) ||
+            payload->DataSize != sizeof(core::UUID::Value)) {
+        return;
+    }
+    core::UUID::Value value = 0;
+    std::memcpy(&value, payload->Data, sizeof(value));
+    spawnAssetEntity(core::UUID{ value });
+}
+
+void EditorLayer::spawnAssetEntity(core::UUID asset) {
+    auto& log = core::Application::get().getLogChannel();
+    if (!m_scene || !m_project || !m_project->isOpen()) {
+        return;
+    }
+    const auto metadata = m_project->assets().catalog().find(asset);
+    if (!metadata) {
+        log.error("Cannot spawn asset {}: not in the catalog", asset.toString());
+        return;
+    }
+
+    if (metadata->type == std::string{ engine::asset::kMeshAssetType }) {
+        auto entity = m_scene->createEntity(sourceStemName(metadata->source_path));
+        auto& mesh_renderer = entity.addComponent<engine::MeshRendererComponent>();
+        mesh_renderer.mesh = arti::asset::AssetHandle<engine::asset::MeshAsset>{ asset };
+        mesh_renderer.materials.push_back(
+                arti::asset::AssetHandle<engine::asset::MaterialAsset>{
+                        engine::asset::kBuiltinDefaultMaterial });
+        m_hierarchy_panel->setSelectedEntity(
+                entity.getComponent<scene::IDComponent>().id);
+        log.info("Spawned '{}' into the scene", metadata->source_path.string());
+        return;
+    }
+
+    if (metadata->type == std::string{ engine::asset::kPrefabAssetType }) {
+        const auto prefab = m_project->assets().load<engine::asset::PrefabAsset>(asset);
+        if (!prefab) {
+            log.error("Failed to load the prefab {}", asset.toString());
+            return;
+        }
+
+        const auto& nodes = prefab->nodes();
+        std::vector<scene::Entity> created;
+        created.reserve(nodes.size());
+        for (const auto& node: nodes) {
+            auto entity = m_scene->createEntity(node.name.empty() ? "Prefab Node" : node.name);
+            auto& transform = entity.getComponent<scene::TransformComponent>();
+            glm::vec3 translation{ 0.0f };
+            glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f };
+            glm::vec3 scale{ 1.0f };
+            glm::vec3 skew{ 0.0f };
+            glm::vec4 perspective{ 1.0f };
+            if (glm::decompose(node.local_transform, scale, rotation, translation, skew,
+                        perspective)) {
+                transform.translation = translation;
+                transform.rotation = rotation;
+                transform.scale = scale;
+            }
+            if (node.mesh.isValid()) {
+                auto& mesh_renderer = entity.addComponent<engine::MeshRendererComponent>();
+                mesh_renderer.mesh =
+                        arti::asset::AssetHandle<engine::asset::MeshAsset>{ node.mesh };
+                for (const auto material: node.materials) {
+                    mesh_renderer.materials.push_back(
+                            arti::asset::AssetHandle<engine::asset::MaterialAsset>{ material });
+                }
+                if (mesh_renderer.materials.empty()) {
+                    mesh_renderer.materials.push_back(
+                            arti::asset::AssetHandle<engine::asset::MaterialAsset>{
+                                    engine::asset::kBuiltinDefaultMaterial });
+                }
+            }
+            created.push_back(entity);
+        }
+        for (size_t index = 0; index < created.size(); ++index) {
+            const uint32_t parent = nodes[index].parent;
+            if (parent != engine::asset::kNoParentNode && parent < created.size()) {
+                m_scene->setParent(created[index], created[parent]);
+            }
+        }
+        if (!created.empty()) {
+            m_hierarchy_panel->setSelectedEntity(
+                    created.front().getComponent<scene::IDComponent>().id);
+        }
+        log.info("Spawned prefab '{}' ({} node(s))", metadata->source_path.string(),
+                created.size());
+        return;
+    }
+
+    log.warn("Asset {} is of type '{}' and cannot be spawned directly",
+            metadata->source_path.string(), metadata->type);
 }
 
 void EditorLayer::updateEditorCamera(float deltaTime) {

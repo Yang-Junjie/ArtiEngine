@@ -51,6 +51,23 @@ std::vector<std::byte> encodeMaterialArtifact(const MaterialAsset::Params& param
     node["Metallic"] = params.metallic_strength;
     node["Roughness"] = params.roughness_strength;
 
+    // 纹理槽只在有效时写出；缺字段的旧 artifact 读回时走默认值。
+    if (params.base_color_texture.isValid()) {
+        node["BaseColorTexture"] = params.base_color_texture.id().toString();
+    }
+    if (params.metallic_roughness_texture.isValid()) {
+        node["MetallicRoughnessTexture"] = params.metallic_roughness_texture.id().toString();
+    }
+    if (params.normal_texture.isValid()) {
+        node["NormalTexture"] = params.normal_texture.id().toString();
+    }
+    if (params.occlusion_texture.isValid()) {
+        node["OcclusionTexture"] = params.occlusion_texture.id().toString();
+    }
+    if (params.emissive_texture.isValid()) {
+        node["EmissiveTexture"] = params.emissive_texture.id().toString();
+    }
+
     YAML::Emitter emitter;
     emitter << node;
     const std::string text = emitter.c_str();
@@ -63,7 +80,8 @@ std::vector<std::byte> encodeMaterialArtifact(const MaterialAsset::Params& param
 std::shared_ptr<arti::asset::Asset> MaterialLoader::decode(
         const arti::asset::AssetMetadata& metadata, const std::filesystem::path& artifact_file,
         std::span<const std::shared_ptr<arti::asset::Asset>> dependencies) {
-    // 纹理还没做成资产，所以这一版没有依赖要消费。
+    // 纹理作为依赖会被 AssetManager 先加载好；这里只需把 UUID 从 artifact 里读回来，
+    // GPUAssetCache 会用同一个 UUID 命中已加载的 TextureAsset。
     (void) dependencies;
 
     const YAML::Node node = YAML::Load(detail::readTextFile(artifact_file));
@@ -94,6 +112,21 @@ std::shared_ptr<arti::asset::Asset> MaterialLoader::decode(
     if (node["Roughness"]) {
         params.roughness_strength = node["Roughness"].as<float>();
     }
+
+    const auto read_texture = [&node](const char* key) {
+        arti::asset::AssetHandle<TextureAsset> handle;
+        if (const auto value = node[key]) {
+            if (const auto parsed = core::UUID::fromString(value.as<std::string>())) {
+                handle = arti::asset::AssetHandle<TextureAsset>{ *parsed };
+            }
+        }
+        return handle;
+    };
+    params.base_color_texture = read_texture("BaseColorTexture");
+    params.metallic_roughness_texture = read_texture("MetallicRoughnessTexture");
+    params.normal_texture = read_texture("NormalTexture");
+    params.occlusion_texture = read_texture("OcclusionTexture");
+    params.emissive_texture = read_texture("EmissiveTexture");
 
     return std::make_shared<MaterialAsset>(metadata.handle, params);
 }

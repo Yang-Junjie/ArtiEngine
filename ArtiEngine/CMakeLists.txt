@@ -1,12 +1,21 @@
 add_library(artiengine STATIC
     asset/builtin_assets.cpp
     asset/detail/mesh_artifact.cpp
+    asset/detail/prefab_artifact.cpp
+    asset/detail/texture_artifact.cpp
     asset/gpu_asset_cache.cpp
+    asset/importers/obj_importer.cpp
+    asset/importers/texture_importer.cpp
     asset/loaders/material_loader.cpp
     asset/loaders/mesh_loader.cpp
+    asset/loaders/prefab_loader.cpp
+    asset/loaders/texture_loader.cpp
     asset/material_asset.cpp
     asset/mesh_asset.cpp
+    asset/prefab_asset.cpp
+    asset/texture_asset.cpp
     scene/component_registration.cpp
+    scene/component_serialization.cpp
     scene/render_scene_extractor.cpp
 )
 add_library(ArtiEngine::Engine ALIAS artiengine)
@@ -26,6 +35,10 @@ target_link_libraries(artiengine
         # 资产类型继承 arti::asset::Asset、loader 实现它的接口，所以也是 PUBLIC。
         ArtiChoco::Asset
         ArtiSDK::GLM
+    PRIVATE
+        # OBJ 解析和图片解码只在 importer 的 .cpp 里用，不出现在公开头。
+        TinyObjLoader::TinyObjLoader
+        stb::stb
 )
 
 set_target_properties(artiengine PROPERTIES FOLDER "ArtiEngine")

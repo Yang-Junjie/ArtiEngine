@@ -3,15 +3,16 @@
 #include "artichoco/asset/asset_manager.h"
 #include "asset/material_asset.h"
 #include "asset/mesh_asset.h"
+#include "asset/texture_asset.h"
 
 namespace arti::engine::asset {
 
-GpuAssetCache::GpuAssetCache(arti::asset::AssetManager& assets,
+GPUAssetCache::GPUAssetCache(arti::asset::AssetManager& assets,
         rendering::Renderer& renderer) noexcept
         : m_assets(&assets),
           m_renderer(&renderer) {}
 
-rendering::MeshHandle GpuAssetCache::meshHandle(core::UUID asset) {
+rendering::MeshHandle GPUAssetCache::meshHandle(core::UUID asset) {
     if (!asset.isValid() || m_failed.contains(asset)) {
         return {};
     }
@@ -32,7 +33,7 @@ rendering::MeshHandle GpuAssetCache::meshHandle(core::UUID asset) {
     return handle;
 }
 
-rendering::MaterialHandle GpuAssetCache::materialHandle(core::UUID asset) {
+rendering::MaterialHandle GPUAssetCache::materialHandle(core::UUID asset) {
     if (!asset.isValid() || m_failed.contains(asset)) {
         return {};
     }
@@ -47,20 +48,54 @@ rendering::MaterialHandle GpuAssetCache::materialHandle(core::UUID asset) {
         return {};
     }
 
-    const auto handle = m_renderer->createMaterial(material_asset->toRenderMaterial());
+    rendering::Material material = material_asset->toRenderMaterial();
+    // 材质引用的纹理解析成渲染期的 TextureHandle。没设纹理的槽是空句柄，
+    // 渲染时由 Renderer 回落到内置白色贴图。
+    const auto& params = material_asset->params();
+    material.base_color_texture = textureHandle(params.base_color_texture.id());
+    material.metallic_roughness_texture = textureHandle(params.metallic_roughness_texture.id());
+    material.normal_texture = textureHandle(params.normal_texture.id());
+    material.occlusion_texture = textureHandle(params.occlusion_texture.id());
+    material.emissive_texture = textureHandle(params.emissive_texture.id());
+
+    const auto handle = m_renderer->createMaterial(material);
     m_materials.emplace(asset, handle);
     return handle;
 }
 
-void GpuAssetCache::clear() {
+rendering::TextureHandle GPUAssetCache::textureHandle(core::UUID asset) {
+    if (!asset.isValid() || m_failed.contains(asset)) {
+        return {};
+    }
+    const auto cached = m_textures.find(asset);
+    if (cached != m_textures.end()) {
+        return cached->second;
+    }
+
+    const auto texture_asset = m_assets->load<TextureAsset>(asset);
+    if (!texture_asset) {
+        m_failed.emplace(asset, true);
+        return {};
+    }
+
+    const auto handle = m_renderer->createTexture(texture_asset->toTextureDesc(asset.toString()));
+    m_textures.emplace(asset, handle);
+    return handle;
+}
+
+void GPUAssetCache::clear() {
     for (const auto& [asset, handle]: m_meshes) {
         m_renderer->destroyMesh(handle);
     }
     for (const auto& [asset, handle]: m_materials) {
         m_renderer->destroyMaterial(handle);
     }
+    for (const auto& [asset, handle]: m_textures) {
+        m_renderer->destroyTexture(handle);
+    }
     m_meshes.clear();
     m_materials.clear();
+    m_textures.clear();
     // 失败记录也清掉：换项目之后同一个 UUID 可能是另一个资产，而且值得重试一次。
     m_failed.clear();
 }

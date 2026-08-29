@@ -11,10 +11,6 @@ namespace arti::engine::asset {
 
 inline constexpr std::string_view kMeshAssetType{ "artiengine.asset.mesh" };
 
-// 纯几何：顶点、索引、submesh、以及每个 submesh 绑到哪个**材质槽名**。
-//
-// 网格不记「用哪个材质资产」—— 那由场景层的 MeshRendererComponent 按槽索引决定。
-// 所以同一个网格能在不同实体上配不同材质，导入网格时也不要求材质已经存在。
 class MeshAsset final : public arti::asset::Asset {
 public:
     MeshAsset(core::UUID handle, std::vector<rendering::MeshVertex> vertices,

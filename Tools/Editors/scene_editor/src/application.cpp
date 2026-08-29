@@ -21,6 +21,7 @@ Application* createApplication(int argc, char** argv) {
     bool auto_play = false;
     bool auto_pick = false;
     bool auto_project = false;
+    bool auto_scene_io = false;
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{ argv[index] };
         if (argument == "--auto-play") {
@@ -29,6 +30,8 @@ Application* createApplication(int argc, char** argv) {
             auto_pick = true;
         } else if (argument == "--auto-project") {
             auto_project = true;
+        } else if (argument == "--auto-scene-io") {
+            auto_scene_io = true;
         } else if (argument == "--frames" && (index + 1) < argc) {
             const std::string_view value{ argv[++index] };
             uint32_t parsed = 0;
@@ -43,7 +46,7 @@ Application* createApplication(int argc, char** argv) {
 
     auto* app = new Application(info);
     app->pushLayer(std::make_unique<editor::EditorLayer>(scene_path, frame_limit, auto_play,
-            auto_pick, auto_project));
+            auto_pick, auto_project, auto_scene_io));
     return app;
 }
 

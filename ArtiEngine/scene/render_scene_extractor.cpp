@@ -20,7 +20,7 @@ glm::vec3 forwardOf(const glm::mat4& world) noexcept {
 } // namespace
 
 const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
-        asset::GpuAssetCache& assets, const rendering::Renderer& renderer, ExtractTarget target) {
+        asset::GPUAssetCache& assets, const rendering::Renderer& renderer, ExtractTarget target) {
     scene.updateWorldTransforms();
 
     m_render_scene.draws.clear();
@@ -60,7 +60,8 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
     }
 
     for (const auto [entity, world, mesh_renderer, id]:
-            scene.view<scene::WorldTransformComponent, MeshRendererComponent, scene::IDComponent>().each()) {
+            scene.view<scene::WorldTransformComponent, MeshRendererComponent, scene::IDComponent>()
+                    .each()) {
         if (!mesh_renderer.visible || !mesh_renderer.mesh.isValid()) {
             continue;
         }

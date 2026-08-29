@@ -1,5 +1,6 @@
 add_executable(scene_editor
     src/application.cpp
+    src/content_browser_panel.cpp
     src/editor_layer.cpp
     src/editor_camera.cpp
     src/editor_gizmo.cpp

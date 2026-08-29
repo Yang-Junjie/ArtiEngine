@@ -8,12 +8,57 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <imgui.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <cstring>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 namespace arti::editor {
 namespace {
 
 template<typename Component>
 Component* tryGet(scene::Entity& entity) {
     return entity.hasComponent<Component>() ? &entity.getComponent<Component>() : nullptr;
+}
+
+constexpr std::size_t kUuidTextLength = 16;
+
+struct MeshRendererEditorState {
+    std::string mesh_text;
+    core::UUID mesh_applied{};
+
+    std::vector<std::string> material_texts;
+    std::vector<core::UUID> materials_applied{};
+};
+
+std::unordered_map<core::UUID, MeshRendererEditorState>& meshRendererEditorStates() {
+    static std::unordered_map<core::UUID, MeshRendererEditorState> states;
+    return states;
+}
+
+std::string uuidToText(core::UUID uuid) {
+    return uuid.toString();
+}
+
+bool parseUuidText(const std::string& text, core::UUID& out) {
+    if (const auto parsed = core::UUID::fromString(text)) {
+        out = *parsed;
+        return true;
+    }
+    return false;
+}
+
+bool drawUuidInput(const char* label, std::string& text, core::UUID& applied) {
+    char buffer[kUuidTextLength + 1]{};
+    std::memcpy(buffer, text.data(), std::min(text.size(), kUuidTextLength));
+
+    if (ImGui::InputText(label, buffer, sizeof(buffer),
+                ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_AutoSelectAll)) {
+        text.assign(buffer);
+    }
+    return parseUuidText(text, applied);
 }
 
 } // namespace
@@ -122,26 +167,88 @@ void InspectorPanel::drawCameraComponent(scene::Entity& entity) {
 }
 
 void InspectorPanel::drawMeshRendererComponent(scene::Entity& entity) {
-    auto* mesh_renderer = tryGet<engine::MeshRendererComponent>(entity);
-    if (mesh_renderer == nullptr) {
-        return;
-    }
-
     if (!ImGui::CollapsingHeader("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
         return;
     }
 
-    ImGui::Checkbox("Visible", &mesh_renderer->visible);
-    ImGui::Text("Mesh:     %s", mesh_renderer->mesh.isValid() ? "set" : "none");
-    ImGui::Text("Materials: %zu slot(s)", mesh_renderer->materials.size());
+    auto* mesh_renderer = tryGet<engine::MeshRendererComponent>(entity);
+    auto& state = meshRendererEditorStates()[entity.getUUID()];
 
-    int submesh = static_cast<int>(mesh_renderer->submesh_index);
-    if (ImGui::DragInt("Submesh", &submesh, 1.0f, 0, 64)) {
-        mesh_renderer->submesh_index = static_cast<uint32_t>(std::max(submesh, 0));
+    if (mesh_renderer != nullptr) {
+        if (mesh_renderer->mesh.id() != state.mesh_applied) {
+            state.mesh_text = uuidToText(mesh_renderer->mesh.id());
+            state.mesh_applied = mesh_renderer->mesh.id();
+        }
+        if (mesh_renderer->materials.size() != state.materials_applied.size()) {
+            state.material_texts.clear();
+            state.materials_applied.clear();
+            for (const auto& material : mesh_renderer->materials) {
+                state.material_texts.push_back(uuidToText(material.id()));
+                state.materials_applied.push_back(material.id());
+            }
+        }
     }
 
-    if (ImGui::SmallButton("Remove##MeshRenderer")) {
-        entity.removeComponent<engine::MeshRendererComponent>();
+    const bool mesh_valid = drawUuidInput("Mesh UUID", state.mesh_text, state.mesh_applied);
+    if (mesh_valid && mesh_renderer != nullptr) {
+        mesh_renderer->mesh =
+                arti::asset::AssetHandle<engine::asset::MeshAsset>{ state.mesh_applied };
+    }
+
+    for (size_t i = 0; i < state.material_texts.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        const bool material_valid = drawUuidInput("Material", state.material_texts[i],
+                state.materials_applied[i]);
+        if (material_valid && mesh_renderer != nullptr && i < mesh_renderer->materials.size()) {
+            mesh_renderer->materials[i] =
+                    arti::asset::AssetHandle<engine::asset::MaterialAsset>{ state.materials_applied[i] };
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Remove")) {
+            state.material_texts.erase(state.material_texts.begin() + static_cast<std::ptrdiff_t>(i));
+            state.materials_applied.erase(
+                    state.materials_applied.begin() + static_cast<std::ptrdiff_t>(i));
+            if (mesh_renderer != nullptr && i < mesh_renderer->materials.size()) {
+                mesh_renderer->materials.erase(
+                        mesh_renderer->materials.begin() + static_cast<std::ptrdiff_t>(i));
+            }
+            --i;
+        }
+        ImGui::PopID();
+    }
+    if (ImGui::SmallButton("Add Material")) {
+        state.material_texts.emplace_back(kUuidTextLength, '0');
+        state.materials_applied.emplace_back(core::UUID{ 0 });
+        if (mesh_renderer != nullptr) {
+            mesh_renderer->materials.emplace_back();
+        }
+    }
+
+    if (mesh_renderer == nullptr) {
+        if (ImGui::SmallButton("Add Component##MeshRenderer")) {
+            engine::MeshRendererComponent component;
+            if (mesh_valid) {
+                component.mesh =
+                        arti::asset::AssetHandle<engine::asset::MeshAsset>{ state.mesh_applied };
+            }
+            for (size_t i = 0; i < state.material_texts.size(); ++i) {
+                core::UUID material_uuid;
+                if (parseUuidText(state.material_texts[i], material_uuid)) {
+                    component.materials.push_back(
+                            arti::asset::AssetHandle<engine::asset::MaterialAsset>{ material_uuid });
+                }
+            }
+            entity.addComponent<engine::MeshRendererComponent>(std::move(component));
+        }
+    } else {
+        ImGui::Checkbox("Visible", &mesh_renderer->visible);
+        int submesh = static_cast<int>(mesh_renderer->submesh_index);
+        if (ImGui::DragInt("Submesh", &submesh, 1.0f, 0, 64)) {
+            mesh_renderer->submesh_index = static_cast<uint32_t>(std::max(submesh, 0));
+        }
+        if (ImGui::SmallButton("Remove##MeshRenderer")) {
+            entity.removeComponent<engine::MeshRendererComponent>();
+        }
     }
 }
 

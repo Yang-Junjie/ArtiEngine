@@ -35,7 +35,19 @@ if(ARTIENGINE_BUILD_TOOLS)
     set_tests_properties(scene_editor_pick_smoke PROPERTIES
         PASS_REGULAR_EXPRESSION "picking_id [0-9]+ \\(hit\\)")
 
+    # 场景存读往返：存一次、清空、读回来、比对实体数和三种组件各自的数量，
+    # 再确认 MeshRenderer 引用的资产 UUID 没变。
+    #
+    # 只比实体数不够 —— 组件漏注册进 SceneSerializationRegistry 时实体照样在，
+    # 但那些组件不会被写进文件，读回来就没了。资产 UUID 也要比，那是「引用真的跨会话稳定」
+    # 的唯一判据，也是先做资产层的理由。
+    add_test(NAME scene_editor_scene_io_smoke
+        COMMAND scene_editor --frames 40 --auto-project --auto-scene-io
+    )
+    set_tests_properties(scene_editor_scene_io_smoke PROPERTIES
+        PASS_REGULAR_EXPRESSION "Scene IO check: round trip OK")
+
     set_tests_properties(scene_editor_no_project_smoke scene_editor_edit_smoke
-        scene_editor_play_smoke scene_editor_pick_smoke
+        scene_editor_play_smoke scene_editor_pick_smoke scene_editor_scene_io_smoke
         PROPERTIES LABELS "requires-display")
 endif()
