@@ -38,6 +38,12 @@ std::unordered_map<core::UUID, MeshRendererEditorState>& meshRendererEditorState
     return states;
 }
 
+// Environment 只有一个 UUID 输入框，不值得为它再开一个 struct。
+std::unordered_map<core::UUID, std::string>& environmentEditorStates() {
+    static std::unordered_map<core::UUID, std::string> states;
+    return states;
+}
+
 std::string uuidToText(core::UUID uuid) {
     return uuid.toString();
 }
@@ -87,6 +93,7 @@ void InspectorPanel::draw(const std::optional<core::UUID>& selected_entity) {
     drawCameraComponent(entity);
     drawMeshRendererComponent(entity);
     drawDirectionalLightComponent(entity);
+    drawEnvironmentComponent(entity);
 
     ImGui::Separator();
     if (ImGui::Button("Add Component")) {
@@ -104,6 +111,10 @@ void InspectorPanel::draw(const std::optional<core::UUID>& selected_entity) {
         if (ImGui::MenuItem("Directional Light", nullptr, false,
                     !entity.hasComponent<engine::DirectionalLightComponent>())) {
             entity.addComponent<engine::DirectionalLightComponent>();
+        }
+        if (ImGui::MenuItem("Environment", nullptr, false,
+                    !entity.hasComponent<engine::EnvironmentComponent>())) {
+            entity.addComponent<engine::EnvironmentComponent>();
         }
         ImGui::EndPopup();
     }
@@ -265,6 +276,37 @@ void InspectorPanel::drawDirectionalLightComponent(scene::Entity& entity) {
 
     if (ImGui::SmallButton("Remove##DirectionalLight")) {
         entity.removeComponent<engine::DirectionalLightComponent>();
+    }
+}
+
+void InspectorPanel::drawEnvironmentComponent(scene::Entity& entity) {
+    auto* environment = tryGet<engine::EnvironmentComponent>(entity);
+    if (environment == nullptr) {
+        return;
+    }
+
+    if (!ImGui::CollapsingHeader("Environment", ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+
+    // UUID 输入框的文本要跨帧保留（用户可能输到一半），所以和 MeshRenderer 一样按实体存一份。
+    auto& text = environmentEditorStates()[entity.getComponent<scene::IDComponent>().id];
+    if (text.empty()) {
+        text = uuidToText(environment->equirect_texture.id());
+    }
+    core::UUID applied{};
+    if (drawUuidInput("Equirect Texture", text, applied)) {
+        environment->equirect_texture =
+                arti::asset::AssetHandle<engine::asset::TextureAsset>{ applied };
+    }
+
+    ImGui::Checkbox("Enabled", &environment->enabled);
+    ImGui::ColorEdit3("Sky Color", glm::value_ptr(environment->sky_color));
+    ImGui::DragFloat("Intensity", &environment->intensity, 0.05f, 0.0f, 100.0f);
+    ImGui::TextDisabled("Equirect texture is not consumed yet (waiting on IBL)");
+
+    if (ImGui::SmallButton("Remove##Environment")) {
+        entity.removeComponent<engine::EnvironmentComponent>();
     }
 }
 

@@ -2,6 +2,7 @@
 
 #include "asset/material_asset.h"
 #include "asset/mesh_asset.h"
+#include "asset/texture_asset.h"
 
 #include <stdexcept>
 
@@ -134,6 +135,31 @@ DirectionalLightComponent DirectionalLightSerialization::deserialize(const YAML:
     return component;
 }
 
+YAML::Node EnvironmentSerialization::serialize(const EnvironmentComponent& component) const {
+    YAML::Node node;
+    node["EquirectTexture"] = writeUUID(component.equirect_texture.id());
+    node["SkyColor"] = writeVector3(component.sky_color);
+    node["Intensity"] = component.intensity;
+    node["Enabled"] = component.enabled;
+    return node;
+}
+
+EnvironmentComponent EnvironmentSerialization::deserialize(const YAML::Node& node) const {
+    requireMap(node, "Environment");
+
+    EnvironmentComponent component;
+    component.equirect_texture =
+            arti::asset::AssetHandle<asset::TextureAsset>{ readUUID(node["EquirectTexture"]) };
+    component.sky_color = readVector3(node["SkyColor"], component.sky_color);
+    if (node["Intensity"]) {
+        component.intensity = node["Intensity"].as<float>();
+    }
+    if (node["Enabled"]) {
+        component.enabled = node["Enabled"].as<bool>();
+    }
+    return component;
+}
+
 void registerSceneSerialization(scene::SceneSerializationRegistry& registry) {
     registry.registerComponent<MeshRendererComponent>(
             std::string{ MeshRendererSerialization::typeName() },
@@ -143,6 +169,9 @@ void registerSceneSerialization(scene::SceneSerializationRegistry& registry) {
     registry.registerComponent<DirectionalLightComponent>(
             std::string{ DirectionalLightSerialization::typeName() },
             std::make_unique<DirectionalLightSerialization>());
+    registry.registerComponent<EnvironmentComponent>(
+            std::string{ EnvironmentSerialization::typeName() },
+            std::make_unique<EnvironmentSerialization>());
 }
 
 } // namespace arti::engine

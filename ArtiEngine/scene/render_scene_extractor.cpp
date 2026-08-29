@@ -25,6 +25,7 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
 
     m_render_scene.draws.clear();
     m_render_scene.lights.clear();
+    m_render_scene.environment = {};
     m_render_scene.view = {};
     m_has_camera = false;
 
@@ -57,6 +58,19 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         desc.color = glm::vec4{ light.color, 1.0f };
         desc.intensity = light.intensity;
         m_render_scene.lights.push_back(desc);
+    }
+
+    // 环境光照只取第一个：「环境」是唯一的那个背景，不像灯光是个列表。没有这个组件时
+    // 保持 EnvironmentDesc 的默认值 —— 那个默认正好等于引入组件之前 pass 里硬编码的环境光，
+    // 所以旧场景的观感不变。
+    for (const auto [entity, environment]: scene.view<EnvironmentComponent>().each()) {
+        rendering::EnvironmentDesc desc;
+        desc.equirectangular_texture = assets.textureHandle(environment.equirect_texture.id());
+        desc.sky_color = glm::vec4{ environment.sky_color, 1.0f };
+        desc.intensity = environment.intensity;
+        desc.enabled = environment.enabled;
+        m_render_scene.environment = desc;
+        break;
     }
 
     for (const auto [entity, world, mesh_renderer, id]:

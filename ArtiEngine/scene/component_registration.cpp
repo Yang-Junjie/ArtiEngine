@@ -10,6 +10,7 @@ void registerSceneComponents(arti::scene::SceneSerializationRegistry* registry) 
     scene::Scene::registerComponentCopy<MeshRendererComponent>();
     scene::Scene::registerComponentCopy<CameraComponent>();
     scene::Scene::registerComponentCopy<DirectionalLightComponent>();
+    scene::Scene::registerComponentCopy<EnvironmentComponent>();
 
     if (registry != nullptr) {
         registerSceneSerialization(*registry);

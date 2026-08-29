@@ -548,6 +548,12 @@ void EditorLayer::createDefaultScene() {
             glm::quat{ glm::vec3{ glm::radians(-50.0f), glm::radians(-30.0f), 0.0f } };
     sun.addComponent<engine::DirectionalLightComponent>();
 
+    // 环境光做成显式实体，和相机、光源一致 —— 否则这个组件在 Add Component 菜单里躺着，
+    // 没人知道它存在。默认值等于引入 EnvironmentDesc 之前 pass 里硬编码的那个环境光，
+    // 所以摆上去画面不变。也顺带让 scene IO 用例覆盖到它的序列化往返。
+    auto environment = m_scene->createEntity("Environment");
+    environment.addComponent<engine::EnvironmentComponent>();
+
     // 中间那个用 PBR 材质，左右两个用默认的 Blinn-Phong。并排放是为了能直接比出两条 pass
     // 的差别，也让 PbrOpaquePass 被 smoke 用例覆盖到 —— 否则那条路在自动化里一个 draw 都不会走。
     for (int index = -1; index <= 1; ++index) {

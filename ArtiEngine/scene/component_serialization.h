@@ -31,6 +31,14 @@ public:
     DirectionalLightComponent deserialize(const YAML::Node& node) const override;
 };
 
+class EnvironmentSerialization final : public scene::ComponentSerialization<EnvironmentComponent> {
+public:
+    static constexpr std::string_view typeName() noexcept { return "artiengine.environment"; }
+
+    YAML::Node serialize(const EnvironmentComponent& component) const override;
+    EnvironmentComponent deserialize(const YAML::Node& node) const override;
+};
+
 void registerSceneSerialization(scene::SceneSerializationRegistry& registry);
 
 } // namespace arti::engine
