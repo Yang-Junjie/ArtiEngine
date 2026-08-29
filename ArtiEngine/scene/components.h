@@ -14,11 +14,13 @@ class MaterialAsset;
 class MeshAsset;
 } // namespace asset
 
+// 一个 MeshRendererComponent 画整个网格：每个 submesh 一个 draw，materials 按下标对应槽位
+// （槽位顺序由 MeshAsset 的 material_slots 决定，导入时就定好了）。materials 比 submesh 少时
+// 缺的那几段回退到默认材质，而不是不画。
 struct MeshRendererComponent {
     arti::asset::AssetHandle<asset::MeshAsset> mesh;
     std::vector<arti::asset::AssetHandle<asset::MaterialAsset>> materials;
 
-    uint32_t submesh_index{ 0 };
     bool visible{ true };
 };
 

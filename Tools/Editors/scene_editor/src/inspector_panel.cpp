@@ -242,10 +242,6 @@ void InspectorPanel::drawMeshRendererComponent(scene::Entity& entity) {
         }
     } else {
         ImGui::Checkbox("Visible", &mesh_renderer->visible);
-        int submesh = static_cast<int>(mesh_renderer->submesh_index);
-        if (ImGui::DragInt("Submesh", &submesh, 1.0f, 0, 64)) {
-            mesh_renderer->submesh_index = static_cast<uint32_t>(std::max(submesh, 0));
-        }
         if (ImGui::SmallButton("Remove##MeshRenderer")) {
             entity.removeComponent<engine::MeshRendererComponent>();
         }

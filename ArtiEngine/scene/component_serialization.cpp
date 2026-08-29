@@ -59,7 +59,6 @@ YAML::Node MeshRendererSerialization::serialize(const MeshRendererComponent& com
     materials.SetStyle(YAML::EmitterStyle::Flow);
     node["Materials"] = materials;
 
-    node["SubmeshIndex"] = component.submesh_index;
     node["Visible"] = component.visible;
     return node;
 }
@@ -77,9 +76,7 @@ MeshRendererComponent MeshRendererSerialization::deserialize(const YAML::Node& n
         }
     }
 
-    if (node["SubmeshIndex"]) {
-        component.submesh_index = node["SubmeshIndex"].as<uint32_t>();
-    }
+    // 旧场景里的 SubmeshIndex 直接忽略：现在一个组件画所有 submesh，这个字段没有对应物了。
     if (node["Visible"]) {
         component.visible = node["Visible"].as<bool>();
     }

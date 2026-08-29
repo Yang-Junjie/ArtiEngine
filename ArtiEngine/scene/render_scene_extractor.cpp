@@ -72,19 +72,31 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
             continue;
         }
 
-        rendering::DrawItem draw;
-        draw.mesh = mesh;
-        draw.submesh_index = mesh_renderer.submesh_index;
-        // 按 submesh 取对应槽的材质。数组比槽短或者那一项无效时留空句柄 ——
-        // 资源注册表会回退到默认材质，而不是整个不画。
-        if (mesh_renderer.submesh_index < mesh_renderer.materials.size()) {
-            draw.material = assets.materialHandle(
-                    mesh_renderer.materials[mesh_renderer.submesh_index].id());
+        const rendering::MeshInfo info = meshInfo(renderer, mesh);
+        // 一个 MeshRendererComponent 画整个网格：每个 submesh 一个 draw。这是 materials 是
+        // 数组而不是单个句柄的原因 —— 下标就是槽位。
+        //
+        // 所有 draw 共用同一个 picking_id：submesh 是网格的内部结构、不是场景里的东西，
+        // 点到哪一段都应该选中这个实体。
+        const uint32_t picking_id = pickingIdFor(id.id);
+        // MeshInfo::bounds 是整个网格的盒子而不是单个 submesh 的（见 mesh.h 的说明），
+        // 所以同一个网格的所有 submesh 共用它。对视锥剔除是偏保守的方向：宁可多画不能漏画。
+        const rendering::AABB bounds = info.bounds.transformed(world.world);
+
+        for (uint32_t submesh = 0; submesh < info.submesh_count; ++submesh) {
+            rendering::DrawItem draw;
+            draw.mesh = mesh;
+            draw.submesh_index = submesh;
+            // 数组比槽位短或者那一项无效时留空句柄 —— 资源注册表会回退到默认材质，
+            // 而不是整个不画。
+            if (submesh < mesh_renderer.materials.size()) {
+                draw.material = assets.materialHandle(mesh_renderer.materials[submesh].id());
+            }
+            draw.transform = world.world;
+            draw.world_bounds = bounds;
+            draw.picking_id = picking_id;
+            m_render_scene.draws.push_back(draw);
         }
-        draw.transform = world.world;
-        draw.world_bounds = worldBounds(renderer, mesh, world.world);
-        draw.picking_id = pickingIdFor(id.id);
-        m_render_scene.draws.push_back(draw);
     }
 
     return m_render_scene;
@@ -110,14 +122,14 @@ std::optional<core::UUID> RenderSceneExtractor::entityForPickingId(uint32_t pick
     return found == m_picking_entities.end() ? std::nullopt : std::optional{ found->second };
 }
 
-rendering::AABB RenderSceneExtractor::worldBounds(const rendering::Renderer& renderer,
-        rendering::MeshHandle mesh, const glm::mat4& world) {
-    auto cached = m_mesh_bounds.find(mesh);
-    if (cached == m_mesh_bounds.end()) {
+rendering::MeshInfo RenderSceneExtractor::meshInfo(const rendering::Renderer& renderer,
+        rendering::MeshHandle mesh) {
+    auto cached = m_mesh_info.find(mesh);
+    if (cached == m_mesh_info.end()) {
         const auto info = renderer.meshInfo(mesh);
-        cached = m_mesh_bounds.emplace(mesh, info ? info->bounds : rendering::AABB{}).first;
+        cached = m_mesh_info.emplace(mesh, info ? *info : rendering::MeshInfo{}).first;
     }
-    return cached->second.transformed(world);
+    return cached->second;
 }
 
 } // namespace arti::engine
