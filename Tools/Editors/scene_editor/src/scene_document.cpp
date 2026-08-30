@@ -2,7 +2,8 @@
 
 #include "editor_context.h"
 #include "editor_project.h"
-#include "file_dialogs.h"
+
+#include "platform/common/file_dialogs.h"
 
 #include "asset/builtin_assets.h"
 #include "asset/material_asset.h"

@@ -5,7 +5,6 @@ add_executable(scene_editor
     src/editor_context.cpp
     src/editor_gizmo.cpp
     src/editor_project.cpp
-    src/file_dialogs.cpp
     src/scene_document.cpp
     src/panels/content_browser_panel.cpp
     src/panels/hierarchy_panel.cpp
@@ -23,6 +22,8 @@ target_link_libraries(scene_editor
     PRIVATE
         ArtiEngine::Engine
         ArtiEngine::ImGui
+        # 原生文件对话框。工具专用,所以在 Tools/platform 而不是 ArtiChoco::Platform。
+        ArtiTools::Platform
         ArtiChoco::Core
         ArtiChoco::Platform
         # 项目的创建/加载和 Assets / Library\Artifacts 两个根目录都归 ProjectManager。

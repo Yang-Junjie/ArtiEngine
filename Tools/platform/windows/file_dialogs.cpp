@@ -1,6 +1,4 @@
-#include "file_dialogs.h"
-
-#ifdef _WIN32
+#include "platform/common/file_dialogs.h"
 
 #define NOMINMAX
 #include <shobjidl.h>
@@ -216,22 +214,3 @@ std::filesystem::path selectDirectory(const std::string& defaultPath) {
 
 } // namespace arti::editor::FileDialogs
 
-#else
-
-namespace arti::editor::FileDialogs {
-
-std::filesystem::path openFile(const char*, const std::string&) {
-    return {};
-}
-
-std::filesystem::path saveFile(const char*, const std::string&) {
-    return {};
-}
-
-std::filesystem::path selectDirectory(const std::string&) {
-    return {};
-}
-
-} // namespace arti::editor::FileDialogs
-
-#endif

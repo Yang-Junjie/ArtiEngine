@@ -4,13 +4,14 @@
 #include "editor_context.h"
 #include "editor_gizmo.h"
 #include "editor_project.h"
-#include "file_dialogs.h"
 #include "scene_document.h"
 
 #include "panels/content_browser_panel.h"
 #include "panels/hierarchy_panel.h"
 #include "panels/inspector_panel.h"
 #include "panels/viewport_panel.h"
+
+#include "platform/common/file_dialogs.h"
 
 #include "asset/builtin_assets.h"
 #include "asset/gpu_asset_cache.h"
