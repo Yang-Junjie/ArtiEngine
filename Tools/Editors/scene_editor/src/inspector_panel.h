@@ -1,20 +1,18 @@
 #pragma once
-#include "artichoco/core/uuid.h"
-
-#include <optional>
 
 namespace arti::scene {
 class Entity;
-class Scene;
 } // namespace arti::scene
 
 namespace arti::editor {
 
+class EditorContext;
+
 class InspectorPanel {
 public:
-    explicit InspectorPanel(scene::Scene& scene);
+    explicit InspectorPanel(EditorContext& context);
 
-    void draw(const std::optional<core::UUID>& selected_entity);
+    void draw();
 
 private:
     void drawTagComponent(scene::Entity& entity);
@@ -24,7 +22,7 @@ private:
     void drawDirectionalLightComponent(scene::Entity& entity);
     void drawEnvironmentComponent(scene::Entity& entity);
 
-    scene::Scene& m_scene;
+    EditorContext& m_context;
 };
 
 } // namespace arti::editor

@@ -1,5 +1,7 @@
 #include "inspector_panel.h"
 
+#include "editor_context.h"
+
 #include "scene/component_registration.h"
 #include "scene/component_serialization.h"
 #include "scene/components.h"
@@ -72,19 +74,20 @@ bool drawUuidInput(const char* label, std::string& text, core::UUID& applied) {
 
 } // namespace
 
-InspectorPanel::InspectorPanel(scene::Scene& scene)
-        : m_scene(scene) {}
+InspectorPanel::InspectorPanel(EditorContext& context)
+        : m_context(context) {}
 
-void InspectorPanel::draw(const std::optional<core::UUID>& selected_entity) {
+void InspectorPanel::draw() {
     ImGui::Begin("Inspector");
 
+    const auto& selected_entity = m_context.selectedEntity();
     if (!selected_entity) {
         ImGui::TextDisabled("No entity selected");
         ImGui::End();
         return;
     }
 
-    auto entity = m_scene.findEntity(*selected_entity);
+    auto entity = m_context.scene().findEntity(*selected_entity);
     if (!entity.isValid()) {
         ImGui::TextDisabled("Invalid entity");
         ImGui::End();

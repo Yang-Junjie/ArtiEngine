@@ -2,32 +2,29 @@
 
 #include "content_browser_panel.h"
 #include "editor_camera.h"
+#include "editor_context.h"
 #include "editor_gizmo.h"
 #include "editor_project.h"
 #include "file_dialogs.h"
 #include "hierarchy_panel.h"
 #include "inspector_panel.h"
+#include "scene_document.h"
 #include "viewport_panel.h"
 
-#include "scene/component_registration.h"
-#include "scene/component_serialization.h"
-#include "scene/components.h"
-#include "scene/render_scene_extractor.h"
 #include "asset/builtin_assets.h"
 #include "asset/gpu_asset_cache.h"
 #include "asset/material_asset.h"
 #include "asset/mesh_asset.h"
 #include "asset/prefab_asset.h"
-#include "asset/texture_asset.h"
 #include "imgui/imgui_host.h"
+#include "scene/components.h"
+#include "scene/render_scene_extractor.h"
 
 #include "artichoco/core/application.h"
 #include "artichoco/platform/window/sdl_vulkan_surface_source.h"
-#include "artichoco/project/project_manager.h"
 #include "artichoco/renderer/render_device.h"
 #include "artichoco/scene/entity.h"
 #include "artichoco/scene/scene.h"
-#include "artichoco/scene/scene_serializer.h"
 
 #include <cstddef>
 #include <cstring>
@@ -35,8 +32,6 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 #include <imgui.h>
-#include <span>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -71,26 +66,21 @@ void EditorLayer::onAttach() {
     renderer_info.present = rendering::PresentMode::IntoUI;
     m_renderer = std::make_unique<rendering::Renderer>(*m_render_device, renderer_info);
 
-    // 两张表一起注册：拷贝表给 Play/Stop 的快照用，序列化表给存读用。
-    // 漏任何一张都是静默丢组件，所以是同一个入口。
-    m_serialization = std::make_unique<scene::SceneSerializationRegistry>();
-    engine::registerSceneComponents(m_serialization.get());
-    m_serializer = std::make_unique<scene::SceneSerializer>(*m_serialization);
-
-    m_scene = std::make_unique<scene::Scene>();
-    m_snapshot = std::make_unique<scene::Scene>();
     m_extractor = std::make_unique<engine::RenderSceneExtractor>();
     m_editor_camera = std::make_unique<EditorCamera>();
     m_gizmo = std::make_unique<EditorGizmo>();
+
     m_project = std::make_unique<EditorProject>(*m_renderer);
+    m_context = std::make_unique<EditorContext>(*m_project);
+    m_document = std::make_unique<SceneDocument>(*m_context);
 
     engine::ImGuiHostCreateInfo imgui_info;
     imgui_info.persist_layout = true;
     imgui_info.docking = true;
     m_imgui = std::make_unique<engine::ImGuiHost>(app.getWindow(), *m_renderer, imgui_info);
 
-    m_hierarchy_panel = std::make_unique<HierarchyPanel>(*m_scene);
-    m_inspector_panel = std::make_unique<InspectorPanel>(*m_scene);
+    m_hierarchy_panel = std::make_unique<HierarchyPanel>(*m_context);
+    m_inspector_panel = std::make_unique<InspectorPanel>(*m_context);
     m_viewport_panel = std::make_unique<ViewportPanel>(*m_renderer);
     m_content_browser_panel = std::make_unique<ContentBrowserPanel>(*m_project);
 
@@ -110,37 +100,26 @@ void EditorLayer::onDetach() {
     m_gizmo.reset();
     m_editor_camera.reset();
     m_extractor.reset();
-    m_snapshot.reset();
-    m_scene.reset();
+    // 顺序：document 引用 context，context 引用 project。
+    m_document.reset();
+    m_context.reset();
+    m_project.reset();
     m_renderer.reset();
     m_render_device.reset();
 }
 
 void EditorLayer::onUpdate(core::Timestep deltaTime) {
     ++m_frame_index;
-    if (!m_scene) {
+    if (!m_context) {
         return;
     }
 
     const float dt = deltaTime.getSeconds();
-
-    if (m_mode == Mode::Edit) {
+    if (m_context->isPlaying()) {
+        m_context->updatePlay(dt);
+    } else {
         updateEditorCamera(dt);
-        return;
     }
-
-    scene::UpdateContext context;
-    context.deltaTime = dt;
-    context.fixedDeltaTime = m_fixed_accumulator.fixedDeltaTime();
-    context.frameIndex = m_play_frame_index++;
-
-    m_fixed_accumulator.tick(dt, [this, &context](float fixed_dt) {
-        context.fixedDeltaTime = fixed_dt;
-        m_scene->runSystems(scene::SystemStage::FixedUpdate, context);
-    });
-
-    m_scene->runSystems(scene::SystemStage::Update, context);
-    m_scene->runSystems(scene::SystemStage::LateUpdate, context);
 }
 
 void EditorLayer::onImGuiRender() {
@@ -154,22 +133,22 @@ void EditorLayer::onImGuiRender() {
 
     m_imgui->dockSpaceOverViewport();
 
-    const bool gizmo_enabled = m_mode == Mode::Edit;
+    const bool gizmo_enabled = !m_context->isPlaying();
     m_gizmo->handleShortcuts(gizmo_enabled);
 
     drawMenuBar();
     drawToolbar();
 
     m_hierarchy_panel->draw();
-    m_inspector_panel->draw(m_hierarchy_panel->selectedEntity());
+    m_inspector_panel->draw();
     m_content_browser_panel->draw();
 
-    const auto selected = m_hierarchy_panel->selectedEntity();
+    const auto selected = m_context->selectedEntity();
     const auto [width, height] = m_viewport_panel->draw([&](const ViewportPanel::ImageRect& rect) {
         if (!gizmo_enabled) {
             return;
         }
-        m_gizmo->draw(*m_scene, selected, m_extractor->renderScene().view, rect.x, rect.y,
+        m_gizmo->draw(m_context->scene(), selected, m_extractor->renderScene().view, rect.x, rect.y,
                 rect.width, rect.height);
     });
     handleViewportAssetDrop(m_viewport_panel->imageRect().x, m_viewport_panel->imageRect().y,
@@ -197,7 +176,7 @@ void EditorLayer::onRender() {
     // 没有 draw、只有 UI 覆盖层。IntoUI 模式下 ImGuiPass 会清 backbuffer，所以界面正常。
     m_renderer->setSceneTargetSize(m_viewport_width, m_viewport_height);
 
-    const bool can_extract = m_scene && m_project && m_project->isOpen() && m_viewport_width != 0 &&
+    const bool can_extract = m_context && m_context->isProjectOpen() && m_viewport_width != 0 &&
                              m_viewport_height != 0;
 
     const rendering::RenderScene* submit = nullptr;
@@ -207,9 +186,10 @@ void EditorLayer::onRender() {
         engine::ExtractTarget target;
         target.width = m_viewport_width;
         target.height = m_viewport_height;
-        submit = &m_extractor->extract(*m_scene, m_project->gpuAssets(), *m_renderer, target);
+        submit = &m_extractor->extract(m_context->scene(), m_project->gpuAssets(), *m_renderer,
+                target);
 
-        if (m_mode == Mode::Edit) {
+        if (!m_context->isPlaying()) {
             m_extractor->overrideView(
                     m_editor_camera->buildRenderView(m_viewport_width, m_viewport_height));
         } else if (!m_extractor->hasCamera()) {
@@ -227,105 +207,13 @@ void EditorLayer::onRender() {
 
     if (const auto pick = m_renderer->takePickResult()) {
         const auto entity = m_extractor->entityForPickingId(pick->picking_id);
-        m_hierarchy_panel->setSelectedEntity(entity);
+        m_context->setSelectedEntity(entity);
     }
 
     if (m_frame_index == 1 && statistics.rendered) {
         core::Application::get().getLogChannel().info("First frame rendered ({} draw calls)",
                 statistics.draw_calls);
     }
-}
-
-void EditorLayer::resetSceneState() {
-    // Play 状态下换场景会让快照指向已经不存在的实体，所以先退回 Edit。
-    if (m_mode == Mode::Play) {
-        exitPlayMode();
-    }
-    m_scene->clearEntities();
-    m_hierarchy_panel->setSelectedEntity(std::nullopt);
-    m_scene_dirty = false;
-}
-
-void EditorLayer::newScene() {
-    resetSceneState();
-    m_scene_file.clear();
-    createDefaultScene();
-    core::Application::get().getLogChannel().info("New scene");
-}
-
-void EditorLayer::openScene() {
-    // 起始目录用项目根，这样对话框直接落在项目里而不是上次的随机位置。
-    const auto root = m_project->rootPath();
-    const auto file = FileDialogs::openFile("Arti Scene\0*.artiscene\0",
-            root ? root->string() : std::string{});
-    if (file.empty()) {
-        return;
-    }
-
-    resetSceneState();
-    try {
-        m_serializer->load(file, *m_scene);
-        m_scene_file = file;
-    } catch (const std::exception& exception) {
-        // 读失败不该让编辑器退出，但场景已经被 clearEntities 清了 —— 所以给个空场景，
-        // 而不是留下半个读进来的场景假装成功。
-        core::Application::get().getLogChannel().error("Failed to open scene: {}",
-                exception.what());
-        m_scene->clearEntities();
-        m_scene_file.clear();
-    }
-}
-
-bool EditorLayer::saveScene(const std::filesystem::path& path) {
-    if (path.empty()) {
-        saveSceneAs();
-        return !m_scene_file.empty();
-    }
-
-    try {
-        m_serializer->save(*m_scene, path);
-    } catch (const std::exception& exception) {
-        core::Application::get().getLogChannel().error("Failed to save scene: {}",
-                exception.what());
-        return false;
-    }
-
-    m_scene_file = path;
-    m_scene_dirty = false;
-
-    // 记进项目，下次打开能回到这个场景。ProjectInfo 里那两个字段是相对项目根的。
-    auto& projects = project::ProjectManager::instance();
-    if (const auto& info = projects.getProjectInfo(); info) {
-        if (const auto root = projects.getProjectRootPath()) {
-            std::error_code error;
-            const auto relative = std::filesystem::relative(path, *root, error);
-            // 场景存在项目外面时 relative 会带 ..，那种路径 ProjectManager 会拒，所以只在
-            // 确实位于项目内时才记。
-            if (!error && !relative.empty() &&
-                    relative.native().find(L"..") == std::wstring::npos) {
-                project::ProjectInfo updated = *info;
-                updated.last_open_scene = relative;
-                projects.setProjectInfo(updated);
-                projects.saveProject();
-            }
-        }
-    }
-    return true;
-}
-
-void EditorLayer::saveSceneAs() {
-    const auto root = m_project->rootPath();
-    const auto file = FileDialogs::saveFile("Arti Scene\0*.artiscene\0",
-            root ? (*root / "Untitled.artiscene").string() : std::string{});
-    if (file.empty()) {
-        return;
-    }
-
-    auto with_extension = file;
-    if (!with_extension.has_extension()) {
-        with_extension.replace_extension(".artiscene");
-    }
-    saveScene(with_extension);
 }
 
 void EditorLayer::newProject() {
@@ -339,10 +227,9 @@ void EditorLayer::newProject() {
         return;
     }
     // 换项目后旧场景引用的资产 UUID 在新 catalog 里可能不存在，所以重建场景。
-    // m_scene_file 也要清 —— 否则 Ctrl+S 会把新项目的场景写回上一个项目里去。
-    resetSceneState();
-    m_scene_file.clear();
-    createDefaultScene();
+    // createNew() 里的 reset() 也会清掉当前文件名 —— 否则 Ctrl+S 会把新项目的场景
+    // 写回上一个项目里去。
+    m_document->createNew();
 }
 
 void EditorLayer::openProject() {
@@ -354,89 +241,10 @@ void EditorLayer::openProject() {
     if (!m_project->open(file)) {
         return;
     }
-    resetSceneState();
-    m_scene_file.clear();
     // 项目记着上次打开的场景就接着上次的，否则给个默认场景。
-    if (!loadLastOpenScene()) {
-        createDefaultScene();
+    if (!m_document->loadLastOpen()) {
+        m_document->createNew();
     }
-}
-
-bool EditorLayer::loadLastOpenScene() {
-    auto& log = core::Application::get().getLogChannel();
-    auto& projects = project::ProjectManager::instance();
-
-    const auto& info = projects.getProjectInfo();
-    if (!info || info->last_open_scene.empty()) {
-        return false;
-    }
-    // last_open_scene 是相对项目根的（saveScene 那边就是这么写进去的）。
-    const auto root = projects.getProjectRootPath();
-    if (!root) {
-        return false;
-    }
-
-    const auto file = *root / info->last_open_scene;
-    std::error_code error;
-    if (!std::filesystem::is_regular_file(file, error) || error) {
-        // 场景被删了或者项目是从别的机器拷过来的 —— 不是错误，只是没得可恢复。
-        log.info("Last open scene '{}' does not exist, falling back to a default scene",
-                info->last_open_scene.string());
-        return false;
-    }
-
-    try {
-        m_serializer->load(file, *m_scene);
-    } catch (const std::exception& exception) {
-        // 和 openScene 一样：读失败不能留下半个场景。清掉，让调用方摆默认场景。
-        log.error("Failed to load the last open scene '{}': {}", file.string(), exception.what());
-        m_scene->clearEntities();
-        return false;
-    }
-
-    m_scene_file = file;
-    m_scene_dirty = false;
-    log.info("Restored the last open scene '{}'", info->last_open_scene.string());
-    return true;
-}
-
-void EditorLayer::createDefaultScene() {
-    // 引用内置资产，不再现场造网格和材质。内置资产的 UUID 是常量，所以这个场景存盘之后
-    // 在任何项目里读回来都指向同一个立方体。
-    const arti::asset::AssetHandle<engine::asset::MeshAsset> cube_mesh{
-        engine::asset::kBuiltinCubeMesh
-    };
-    const arti::asset::AssetHandle<engine::asset::MaterialAsset> pbr_material{
-        engine::asset::kBuiltinDefaultMaterial
-    };
-
-    auto camera = m_scene->createEntity("Main Camera");
-    camera.getComponent<scene::TransformComponent>().translation = glm::vec3{ 0.0f, 1.5f, 4.0f };
-    camera.addComponent<engine::CameraComponent>();
-
-    auto sun = m_scene->createEntity("Directional Light");
-    sun.getComponent<scene::TransformComponent>().rotation =
-            glm::quat{ glm::vec3{ glm::radians(-50.0f), glm::radians(-30.0f), 0.0f } };
-    sun.addComponent<engine::DirectionalLightComponent>();
-
-    // 环境光做成显式实体，和相机、光源一致 —— 否则这个组件在 Add Component 菜单里躺着，
-    // 没人知道它存在。默认值等于引入 EnvironmentDesc 之前 pass 里硬编码的那个环境光，
-    // 所以摆上去画面不变。
-    auto environment = m_scene->createEntity("Environment");
-    environment.addComponent<engine::EnvironmentComponent>();
-
-    // 中间那个用 PBR 材质，左右两个用默认的 Blinn-Phong。并排放是为了能直接比出两条 pass
-    // 的差别。
-    for (int index = -1; index <= 1; ++index) {
-        auto cube = m_scene->createEntity("Cube");
-        cube.getComponent<scene::TransformComponent>().translation =
-                glm::vec3{ static_cast<float>(index) * 1.6f, 0.0f, 0.0f };
-        auto& mesh_renderer = cube.addComponent<engine::MeshRendererComponent>();
-        mesh_renderer.mesh = cube_mesh;
-        mesh_renderer.materials.push_back(pbr_material);
-    }
-
-    core::Application::get().getLogChannel().info("Created default scene");
 }
 
 void EditorLayer::drawMenuBar() {
@@ -449,20 +257,18 @@ void EditorLayer::drawMenuBar() {
                 openProject();
             }
             ImGui::Separator();
-            // 场景操作需要项目：场景里的资产 UUID 要在项目的 catalog 里查得到，
-            // 场景路径也要记进 ProjectInfo。没项目时置灰。
-            const bool project_open = m_project && m_project->isOpen();
+            const bool project_open = m_context->isProjectOpen();
             if (ImGui::MenuItem("New Scene", "Ctrl+N", false, project_open)) {
-                newScene();
+                m_document->createNew();
             }
             if (ImGui::MenuItem("Open Scene...", "Ctrl+O", false, project_open)) {
-                openScene();
+                m_document->open();
             }
             if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, project_open)) {
-                saveScene(m_scene_file);
+                m_document->save();
             }
             if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S", false, project_open)) {
-                saveSceneAs();
+                m_document->saveAs();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit")) {
@@ -484,12 +290,12 @@ void EditorLayer::drawMenuBar() {
 void EditorLayer::drawToolbar() {
     ImGui::Begin("Toolbar", nullptr);
 
-    const bool playing = m_mode == Mode::Play;
+    const bool playing = m_context->isPlaying();
     if (ImGui::Button(playing ? "Stop" : "Play", ImVec2{ 80.0f, 0.0f })) {
         if (playing) {
-            exitPlayMode();
+            m_context->exitPlayMode();
         } else {
-            enterPlayMode();
+            m_context->enterPlayMode();
         }
     }
 
@@ -522,30 +328,6 @@ void EditorLayer::drawToolbar() {
     ImGui::End();
 }
 
-void EditorLayer::enterPlayMode() {
-    if (m_mode == Mode::Play) {
-        return;
-    }
-
-    m_snapshot->copyEntitiesFrom(*m_scene);
-    m_mode = Mode::Play;
-    m_play_frame_index = 0;
-    m_fixed_accumulator = core::FixedTimestepAccumulator{};
-
-    core::Application::get().getLogChannel().info("Entered Play mode (scene snapshotted)");
-}
-
-void EditorLayer::exitPlayMode() {
-    if (m_mode == Mode::Edit) {
-        return;
-    }
-
-    m_scene->copyEntitiesFrom(*m_snapshot);
-    m_mode = Mode::Edit;
-
-    core::Application::get().getLogChannel().info("Returned to Edit mode (scene restored)");
-}
-
 void EditorLayer::handleViewportAssetDrop(float rect_x, float rect_y, float rect_width,
         float rect_height) {
     const ImVec2 mouse = ImGui::GetMousePos();
@@ -568,7 +350,7 @@ void EditorLayer::handleViewportAssetDrop(float rect_x, float rect_y, float rect
 
 void EditorLayer::spawnAssetEntity(core::UUID asset) {
     auto& log = core::Application::get().getLogChannel();
-    if (!m_scene || !m_project || !m_project->isOpen()) {
+    if (!m_context || !m_context->isProjectOpen()) {
         return;
     }
     const auto metadata = m_project->assets().catalog().find(asset);
@@ -577,15 +359,17 @@ void EditorLayer::spawnAssetEntity(core::UUID asset) {
         return;
     }
 
+    auto& scene = m_context->scene();
+
     if (metadata->type == std::string{ engine::asset::kMeshAssetType }) {
-        auto entity = m_scene->createEntity(sourceStemName(metadata->source_path));
+        auto entity = scene.createEntity(sourceStemName(metadata->source_path));
         auto& mesh_renderer = entity.addComponent<engine::MeshRendererComponent>();
         mesh_renderer.mesh = arti::asset::AssetHandle<engine::asset::MeshAsset>{ asset };
         mesh_renderer.materials.push_back(
                 arti::asset::AssetHandle<engine::asset::MaterialAsset>{
                         engine::asset::kBuiltinDefaultMaterial });
-        m_hierarchy_panel->setSelectedEntity(
-                entity.getComponent<scene::IDComponent>().id);
+        m_context->setSelectedEntity(entity.getComponent<scene::IDComponent>().id);
+        m_document->markDirty();
         log.info("Spawned '{}' into the scene", metadata->source_path.string());
         return;
     }
@@ -601,7 +385,7 @@ void EditorLayer::spawnAssetEntity(core::UUID asset) {
         std::vector<scene::Entity> created;
         created.reserve(nodes.size());
         for (const auto& node: nodes) {
-            auto entity = m_scene->createEntity(node.name.empty() ? "Prefab Node" : node.name);
+            auto entity = scene.createEntity(node.name.empty() ? "Prefab Node" : node.name);
             auto& transform = entity.getComponent<scene::TransformComponent>();
             glm::vec3 translation{ 0.0f };
             glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f };
@@ -633,13 +417,13 @@ void EditorLayer::spawnAssetEntity(core::UUID asset) {
         for (size_t index = 0; index < created.size(); ++index) {
             const uint32_t parent = nodes[index].parent;
             if (parent != engine::asset::kNoParentNode && parent < created.size()) {
-                m_scene->setParent(created[index], created[parent]);
+                scene.setParent(created[index], created[parent]);
             }
         }
         if (!created.empty()) {
-            m_hierarchy_panel->setSelectedEntity(
-                    created.front().getComponent<scene::IDComponent>().id);
+            m_context->setSelectedEntity(created.front().getComponent<scene::IDComponent>().id);
         }
+        m_document->markDirty();
         log.info("Spawned prefab '{}' ({} node(s))", metadata->source_path.string(),
                 created.size());
         return;

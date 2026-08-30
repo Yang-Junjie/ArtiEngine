@@ -3,11 +3,13 @@ add_executable(scene_editor
     src/content_browser_panel.cpp
     src/editor_layer.cpp
     src/editor_camera.cpp
+    src/editor_context.cpp
     src/editor_gizmo.cpp
     src/editor_project.cpp
     src/file_dialogs.cpp
     src/hierarchy_panel.cpp
     src/inspector_panel.cpp
+    src/scene_document.cpp
     src/viewport_panel.cpp
 )
 
