@@ -10,6 +10,7 @@
 #include "artichoco/project/project_manager.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <filesystem>
 #include <imgui.h>
@@ -33,24 +34,6 @@ std::string_view typeLabel(std::string_view type) {
         return "Prefab";
     }
     return "Asset";
-}
-
-// 复合导入（.obj 会产出 mesh / material / texture / prefab 一篮子子资产）时
-// 决定哪一份作为这个源文件的「主资产」：prefab 最完整，其次是 mesh。
-int typePriority(std::string_view type) {
-    if (type == engine::asset::kPrefabAssetType) {
-        return 3;
-    }
-    if (type == engine::asset::kMeshAssetType) {
-        return 2;
-    }
-    if (type == engine::asset::kMaterialAssetType) {
-        return 1;
-    }
-    if (type == engine::asset::kTextureAssetType) {
-        return 0;
-    }
-    return -1;
 }
 
 std::string lower(std::string text) {
@@ -90,7 +73,7 @@ void ContentBrowserPanel::draw() {
 void ContentBrowserPanel::drawHeader() {
     if (ImGui::SmallButton("Refresh")) {
         // 编辑器开着的时候往 Assets/ 里丢了文件，点一下扫进来。
-        m_project->importPending();
+        m_project->assetPipeline().importPending();
     }
     ImGui::SameLine();
     if (!m_current_dir.empty() && ImGui::SmallButton("Up")) {
@@ -116,8 +99,8 @@ void ContentBrowserPanel::drawDirectory(const std::filesystem::path& assets_root
 
     std::vector<Entry> entries;
     std::error_code error;
-    for (const auto& entry: std::filesystem::directory_iterator{ assets_root / m_current_dir,
-                 error }) {
+    for (const auto& entry:
+            std::filesystem::directory_iterator{ assets_root / m_current_dir, error }) {
         if (error) {
             break;
         }
@@ -125,11 +108,10 @@ void ContentBrowserPanel::drawDirectory(const std::filesystem::path& assets_root
             continue;
         }
         const bool is_directory = entry.is_directory(error);
-        const std::filesystem::path relative =
-                m_current_dir.empty() ? entry.path().filename()
-                                      : m_current_dir / entry.path().filename();
-        entries.push_back({ std::move(relative), entry.path().filename().string(),
-            is_directory });
+        const std::filesystem::path relative = m_current_dir.empty()
+                                                       ? entry.path().filename()
+                                                       : m_current_dir / entry.path().filename();
+        entries.push_back({ std::move(relative), entry.path().filename().string(), is_directory });
     }
     std::ranges::sort(entries, [](const Entry& left, const Entry& right) {
         if (left.is_directory != right.is_directory) {
@@ -159,12 +141,10 @@ void ContentBrowserPanel::drawDirectory(const std::filesystem::path& assets_root
         }
 
         const auto info = assetInfoFor(entry.relative);
-        const bool selected = info.imported && m_selected_asset &&
-                              *m_selected_asset == info.primary_handle;
-        if (ImGui::Selectable(entry.name.c_str(), selected,
-                    ImGuiSelectableFlags_SpanAllColumns)) {
-            m_selected_asset = info.imported ? std::optional{ info.primary_handle }
-                                             : std::nullopt;
+        const bool selected =
+                info.imported && m_selected_asset && *m_selected_asset == info.primary_handle;
+        if (ImGui::Selectable(entry.name.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns)) {
+            m_selected_asset = info.imported ? std::optional{ info.primary_handle } : std::nullopt;
         }
         if (info.imported) {
             if (ImGui::BeginDragDropSource()) {
@@ -182,11 +162,13 @@ void ContentBrowserPanel::drawDirectory(const std::filesystem::path& assets_root
         ImGui::TableSetColumnIndex(1);
         if (info.imported) {
             ImGui::TextColored(ImVec4{ 0.6f, 0.9f, 0.7f, 1.0f }, "%s", info.type_label.c_str());
+        } else if (!m_project->assetPipeline().canImport(entry.relative)) {
+            ImGui::TextDisabled("not importable");
         } else {
             ImGui::TextDisabled("not imported");
             ImGui::SameLine();
             if (ImGui::SmallButton("Import")) {
-                m_project->importFile(entry.relative);
+                m_project->assetPipeline().importFile(entry.relative);
             }
         }
 
@@ -208,23 +190,14 @@ void ContentBrowserPanel::drawDirectory(const std::filesystem::path& assets_root
 ContentBrowserPanel::FileAssetInfo ContentBrowserPanel::assetInfoFor(
         const std::filesystem::path& relative) const {
     FileAssetInfo info;
-    int best_priority = -2;
-    const auto source = relative.generic_string();
-    for (const auto& metadata: m_project->assets().catalog().allMetadata()) {
-        const auto candidate = metadata.source_path.generic_string();
-        const bool exact = candidate == source;
-        const bool sub_asset = !exact && candidate.size() > source.size() &&
-                               candidate.starts_with(source) && candidate[source.size()] == '.';
-        if (!exact && !sub_asset) {
-            continue;
-        }
+    // 复合导入时 prefab 优先，其次是 mesh。查询结果由 AssetPipeline 跨帧缓存。
+    constexpr std::array<std::string_view, 4> preferred_types{ engine::asset::kPrefabAssetType,
+        engine::asset::kMeshAssetType, engine::asset::kMaterialAssetType,
+        engine::asset::kTextureAssetType };
+    if (const auto primary = m_project->assetPipeline().primaryAsset(relative, preferred_types)) {
         info.imported = true;
-        // 复合导入时按优先级挑一份当主资产；非标准类型也能被收录（-2 兜底）。
-        if (const int priority = typePriority(metadata.type); priority > best_priority) {
-            best_priority = priority;
-            info.primary_handle = metadata.handle;
-            info.type_label = std::string{ typeLabel(metadata.type) };
-        }
+        info.primary_handle = primary->handle;
+        info.type_label = std::string{ typeLabel(primary->type) };
     }
     return info;
 }

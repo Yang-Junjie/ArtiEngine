@@ -22,6 +22,7 @@ target_link_libraries(scene_editor
     PRIVATE
         ArtiEngine::Engine
         ArtiEngine::ImGui
+        ArtiTools::Asset
         # 原生文件对话框。工具专用,所以在 Tools/platform 而不是 ArtiChoco::Platform。
         ArtiTools::Platform
         ArtiChoco::Core
