@@ -1,15 +1,16 @@
 #include "editor_layer.h"
 
-#include "content_browser_panel.h"
 #include "editor_camera.h"
 #include "editor_context.h"
 #include "editor_gizmo.h"
 #include "editor_project.h"
 #include "file_dialogs.h"
-#include "hierarchy_panel.h"
-#include "inspector_panel.h"
 #include "scene_document.h"
-#include "viewport_panel.h"
+
+#include "panels/content_browser_panel.h"
+#include "panels/hierarchy_panel.h"
+#include "panels/inspector_panel.h"
+#include "panels/viewport_panel.h"
 
 #include "asset/builtin_assets.h"
 #include "asset/gpu_asset_cache.h"

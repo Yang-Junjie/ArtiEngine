@@ -1,4 +1,4 @@
-#include "content_browser_panel.h"
+#include "panels/content_browser_panel.h"
 
 #include "editor_project.h"
 

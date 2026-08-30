@@ -1,4 +1,4 @@
-#include "hierarchy_panel.h"
+#include "panels/hierarchy_panel.h"
 
 #include "editor_context.h"
 

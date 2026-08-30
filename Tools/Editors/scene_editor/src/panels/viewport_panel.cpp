@@ -1,4 +1,4 @@
-#include "viewport_panel.h"
+#include "panels/viewport_panel.h"
 
 #include "arti_renderer.h"
 #include "editor_gizmo.h"

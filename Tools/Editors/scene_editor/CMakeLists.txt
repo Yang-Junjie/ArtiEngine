@@ -1,19 +1,23 @@
 add_executable(scene_editor
     src/application.cpp
-    src/content_browser_panel.cpp
     src/editor_layer.cpp
     src/editor_camera.cpp
     src/editor_context.cpp
     src/editor_gizmo.cpp
     src/editor_project.cpp
     src/file_dialogs.cpp
-    src/hierarchy_panel.cpp
-    src/inspector_panel.cpp
     src/scene_document.cpp
-    src/viewport_panel.cpp
+    src/panels/content_browser_panel.cpp
+    src/panels/hierarchy_panel.cpp
+    src/panels/inspector_panel.cpp
+    src/panels/viewport_panel.cpp
 )
 
 target_compile_features(scene_editor PRIVATE cxx_std_20)
+
+# src 进搜索路径,所以面板写 "panels/xxx.h" 而不是 "../xxx.h" ——
+# 后者的层数会随文件挪窝而失效。
+target_include_directories(scene_editor PRIVATE src)
 
 target_link_libraries(scene_editor
     PRIVATE

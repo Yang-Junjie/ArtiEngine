@@ -1,4 +1,4 @@
-#include "inspector_panel.h"
+#include "panels/inspector_panel.h"
 
 #include "editor_context.h"
 
