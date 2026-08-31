@@ -1,0 +1,36 @@
+Version: 2
+Source:
+  Path: Model/DamagedHelmet/DamagedHelmet.gltf
+  ContentHash: 0
+  Size: 4537
+Importer:
+  Name: artiengine.GltfImporter
+  Version: 1
+Settings:
+  Authored:
+    {}
+  Inferred:
+    {}
+  ResolvedHash: 14695981039346656037
+Assets:
+  - LocalId: material.Material_MR
+    Handle: b94ed5f1ba5cf9bb
+    Type: artiengine.asset.material
+    ArtifactPath: Imported/b94ed5f1ba5cf9bb.artimaterial
+    Properties:
+      {}
+    Dependencies: [166bddf43a7f7709, cd2b56499fe5fbc0, 8ea7e67980f5808c, 40c0c15b66307e08, df5ce18e6867affd]
+  - LocalId: mesh.mesh_helmet_LP_13930damagedHelmet
+    Handle: ef5589e01a7ccc3c
+    Type: artiengine.asset.mesh
+    ArtifactPath: Imported/ef5589e01a7ccc3c.artimesh
+    Properties:
+      {}
+    Dependencies: []
+  - LocalId: prefab
+    Handle: ec2a1700b026053c
+    Type: artiengine.asset.prefab
+    ArtifactPath: Imported/ec2a1700b026053c.artiprefab
+    Properties:
+      {}
+    Dependencies: [ef5589e01a7ccc3c, b94ed5f1ba5cf9bb]

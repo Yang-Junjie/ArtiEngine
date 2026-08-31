@@ -5,7 +5,9 @@ add_library(artiengine STATIC
     asset/detail/texture_artifact.cpp
     asset/gpu_asset_cache.cpp
     asset/importers/detail/gltf_parser.cpp
+    asset/importers/detail/mtl_scan.cpp
     asset/importers/gltf_importer.cpp
+    asset/importers/material_importer.cpp
     asset/importers/obj_importer.cpp
     asset/importers/texture_importer.cpp
     asset/loaders/material_loader.cpp

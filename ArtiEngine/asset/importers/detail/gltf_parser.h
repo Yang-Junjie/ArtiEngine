@@ -57,6 +57,20 @@ struct GltfScene {
     std::vector<GltfNode> nodes;
 };
 
+// glTF 引用的一张外部图片，以及它在材质里的用途。
+struct GltfImageUsage {
+    std::filesystem::path file;  // 绝对路径
+    // "base_color" / "emissive" / "normal" / "metallic_roughness" / "occlusion"
+    std::string usage;
+    // 颜色数据（base_color / emissive）需要 sRGB，数据贴图需要 linear。
+    bool is_color{ false };
+};
+
 GltfScene parseGltf(const std::filesystem::path& source_file);
+
+// 只解析 JSON 头，不加载 buffer、不解码图片：列出被引用的外部图片及其用途。
+// 内嵌图片（data URI / buffer view）没有源文件，不在这里出现 —— 它们仍然由
+// GltfImporter 产出成子资产。
+std::vector<GltfImageUsage> prescanGltfImages(const std::filesystem::path& source_file);
 
 }

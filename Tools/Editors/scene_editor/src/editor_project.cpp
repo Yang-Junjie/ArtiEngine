@@ -55,13 +55,19 @@ bool EditorProject::finishOpen() {
             std::make_unique<engine::asset::GPUAssetCache>(m_asset_pipeline.manager(), *m_renderer);
     m_open = true;
 
-    const auto scan = m_asset_pipeline.importPending();
-    if (scan.imported_files > 0) {
-        log().info("Imported {} pending source file(s)", scan.imported_files);
+    const auto report = m_asset_pipeline.reconcile();
+    if (report.imported > 0 || report.reimported > 0) {
+        log().info("Reconcile imported {} and reimported {} source file(s)", report.imported,
+                report.reimported);
     }
-    if (!scan.succeeded()) {
-        log().warn("Asset scan completed with {} failed file(s): {}", scan.failed_files,
-                scan.traversal_error.empty() ? "no traversal error" : scan.traversal_error);
+    if (report.forgotten > 0) {
+        log().info("Reconcile forgot {} orphaned asset(s)", report.forgotten);
+    }
+    if (!report.succeeded()) {
+        log().warn("Reconcile finished with {} failed file(s)", report.failed);
+        for (const auto& error: report.errors) {
+            log().warn("  {}", error);
+        }
     }
 
     const auto& info = projects.getProjectInfo();

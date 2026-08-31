@@ -81,11 +81,6 @@ std::vector<std::byte> encodeMaterialArtifact(const MaterialAsset::Params& param
 std::shared_ptr<arti::asset::Asset> MaterialLoader::decode(
         const arti::asset::AssetMetadata& metadata, const std::filesystem::path& artifact_file,
         std::span<const std::shared_ptr<arti::asset::Asset>> dependencies) {
-    // TODO(patch): dependencies 被刻意忽略。纹理的 UUID 是从 artifact 里读回来的，
-    // GPUAssetCache 用同一个 UUID 命中已加载的 TextureAsset，所以这个参数在这里没有数据用途 ——
-    // 它只保证 AssetManager 的加载顺序和缓存失效传播。
-    (void) dependencies;
-
     const YAML::Node node = YAML::Load(detail::readTextFile(artifact_file));
 
     MaterialAsset::Params params;
@@ -134,7 +129,12 @@ std::shared_ptr<arti::asset::Asset> MaterialLoader::decode(
     params.occlusion_texture = read_texture("OcclusionTexture");
     params.emissive_texture = read_texture("EmissiveTexture");
 
-    return std::make_shared<MaterialAsset>(metadata.handle, params);
+    // 持住 AssetManager 已经递归加载好的依赖。artifact 里存的是 UUID，
+    // 但 AssetManager::m_loaded 是 weak_ptr —— 不持引用的话，材质手里的
+    // UUID 可能指向一个已被回收的纹理。纹理跨源共享之后这一点尤其要紧。
+    std::vector<std::shared_ptr<arti::asset::Asset>> retained{ dependencies.begin(),
+        dependencies.end() };
+    return std::make_shared<MaterialAsset>(metadata.handle, params, std::move(retained));
 }
 
 }

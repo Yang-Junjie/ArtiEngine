@@ -74,6 +74,19 @@ CgltfData openDocument(const std::filesystem::path& file) {
     return data;
 }
 
+// prescan 用：只解析 JSON，不 load_buffers、不 validate。
+// 外部图片引用全在 JSON 里，buffer 与它们无关。
+CgltfData parseDocumentOnly(const std::filesystem::path& file) {
+    cgltf_options options{};
+    cgltf_data* raw = nullptr;
+    const std::string name = file.string();
+    const cgltf_result result = cgltf_parse_file(&options, name.c_str(), &raw);
+    if (result != cgltf_result_success) {
+        fail("parse", file, result);
+    }
+    return CgltfData{ raw };
+}
+
 std::string sanitizeKey(std::string key) {
     std::ranges::replace(key, '/', '_');
     std::ranges::replace(key, '\\', '_');
@@ -493,6 +506,65 @@ void collectNodes(std::vector<GltfNode>& nodes, const cgltf_data& data, const cg
     }
 }
 
+}
+
+std::vector<GltfImageUsage> prescanGltfImages(const std::filesystem::path& source_file) {
+    const CgltfData data = parseDocumentOnly(source_file);
+    const std::filesystem::path base_directory = source_file.parent_path();
+
+    // image 下标 → 绝对路径。内嵌图片（data URI / buffer view）没有源文件，跳过。
+    std::vector<std::filesystem::path> files(static_cast<size_t>(data->images_count));
+    for (cgltf_size index = 0; index < data->images_count; ++index) {
+        const cgltf_image& image = data->images[index];
+        if (image.uri == nullptr || image.uri[0] == '\0' ||
+                std::string_view{ image.uri }.starts_with("data:")) {
+            continue;
+        }
+        std::string decoded{ image.uri };
+        decoded.resize(cgltf_decode_uri(decoded.data()));
+        files[static_cast<size_t>(index)] =
+                (base_directory / std::filesystem::path{ decoded }).lexically_normal();
+    }
+
+    std::vector<GltfImageUsage> usages;
+    const auto note = [&](const cgltf_texture_view& view, std::string_view usage, bool is_color) {
+        if (view.texture == nullptr) {
+            return;
+        }
+        const cgltf_image* image = view.texture->image;
+        if (image == nullptr && view.texture->has_webp) {
+            image = view.texture->webp_image;
+        }
+        if (image == nullptr) {
+            return;
+        }
+        const auto index = static_cast<size_t>(cgltf_image_index(data.get(), image));
+        if (index >= files.size() || files[index].empty()) {
+            return;
+        }
+        // 同一张图被同一用途多次引用只记一条。被不同用途引用则各记一条，
+        // 冲突留给上层裁决 —— 这是 Godot 模型固有的代价：一个文件一份设置。
+        const auto existing = std::ranges::find_if(usages, [&](const GltfImageUsage& entry) {
+            return entry.file == files[index] && entry.usage == usage;
+        });
+        if (existing != usages.end()) {
+            return;
+        }
+        usages.push_back({ files[index], std::string{ usage }, is_color });
+    };
+
+    for (cgltf_size index = 0; index < data->materials_count; ++index) {
+        const cgltf_material& material = data->materials[index];
+        if (material.has_pbr_metallic_roughness) {
+            note(material.pbr_metallic_roughness.base_color_texture, "base_color", true);
+            note(material.pbr_metallic_roughness.metallic_roughness_texture,
+                    "metallic_roughness", false);
+        }
+        note(material.emissive_texture, "emissive", true);
+        note(material.normal_texture, "normal", false);
+        note(material.occlusion_texture, "occlusion", false);
+    }
+    return usages;
 }
 
 GltfScene parseGltf(const std::filesystem::path& source_file) {

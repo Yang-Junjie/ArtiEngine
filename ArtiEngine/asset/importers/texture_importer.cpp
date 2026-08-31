@@ -11,63 +11,47 @@ std::vector<std::string> TextureImporter::getSupportedExtensions() const {
     return { ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".gif", ".hdr" };
 }
 
-std::string TextureImporter::formatFromExistingMetadata(
-        const std::optional<arti::asset::AssetMetadata>& existing) const {
-    if (existing) {
-        if (const auto found = existing->properties.find("format");
-                found != existing->properties.end()) {
-            if (const auto* value = std::get_if<std::string>(&found->second);
-                    value != nullptr && detail::textureFormatFromName(*value)) {
-                return *value;
-            }
-        }
-    }
-    return std::string{ detail::textureFormatName(rendering::TextureFormat::RGBA8Srgb) };
+std::vector<arti::asset::SettingDescriptor> TextureImporter::getSettingSchema() const {
+    arti::asset::SettingDescriptor colorspace;
+    colorspace.key = kColorspaceSetting;
+    // 默认 sRGB：单看一张图片无法判断用途，颜色数据是更常见的情况。
+    // 容器（glTF）能按绑定的槽位推断出 linear，那条走 Inferred 层。
+    colorspace.default_value = std::string{ kColorspaceSrgb };
+    colorspace.allowed = { kColorspaceSrgb, kColorspaceLinear };
+    colorspace.doc = "sRGB for color data (albedo, emissive); linear for data maps "
+                     "(normal, metallic-roughness, occlusion).";
+    return { std::move(colorspace) };
 }
 
-std::vector<std::byte> TextureImporter::encode(const arti::asset::AssetMetadata&,
-        const std::filesystem::path& source_path) const {
-    const auto file = resolveSourceFile(source_path);
-    if (file.extension() == ".hdr" || file.extension() == ".HDR") {
-        const auto image = detail::decodeImageRGBA16F(file);
-        return detail::encodeTextureArtifact(image.rgba, image.width, image.height,
-                rendering::TextureFormat::RGBA16Float, true);
-    }
-    const auto image = detail::decodeImageFile(file);
-    return detail::encodeTextureArtifact(image.rgba, image.width, image.height,
-            rendering::TextureFormat::RGBA8Srgb, true);
-}
-
-arti::asset::AssetImportResult TextureImporter::import(const std::filesystem::path& source_path) {
+arti::asset::AssetImportResult TextureImporter::import(
+        const arti::asset::AssetImportRequest& request) {
+    const std::filesystem::path& source_path = request.source_path;
     arti::asset::AssetImportResult result;
     try {
         const auto file = resolveSourceFile(source_path);
         const bool is_hdr = file.extension() == ".hdr" || file.extension() == ".HDR";
 
-        auto output = startOutput(source_path, "", kTextureAssetType, ".artitexture");
+        // local_id 为空：一张图片就是一个纹理资产，没有子资产。
+        auto output = startOutput(source_path, {}, kTextureAssetType, ".artitexture");
 
-        const std::string format_name = is_hdr
-                ? std::string{ detail::textureFormatName(rendering::TextureFormat::RGBA16Float) }
-                : formatFromExistingMetadata(
-                        m_catalog->findBySourcePathAndType(source_path,
-                                std::string{ kTextureAssetType }));
-        const auto format = detail::textureFormatFromName(format_name).value_or(
-                rendering::TextureFormat::RGBA8Srgb);
+        // HDR 一律 RGBA16F（本身就是线性浮点）；其余由 Colorspace 设置决定。
+        // 设置来自 default → inferred → authored 的解析结果，所以这里不需要
+        // fallback 分支。
+        const bool linear = !is_hdr && request.settings != nullptr &&
+                            request.settings->getString(kColorspaceSetting) == kColorspaceLinear;
+        const auto format = is_hdr ? rendering::TextureFormat::RGBA16Float
+                : linear          ? rendering::TextureFormat::RGBA8Unorm
+                                  : rendering::TextureFormat::RGBA8Srgb;
 
         const auto image = is_hdr ? detail::decodeImageRGBA16F(file)
                                   : detail::decodeImageFile(file);
 
-        output.metadata.properties["importer"] = std::string{ "artiengine.TextureImporter" };
-        output.metadata.properties["width"] = static_cast<uint64_t>(image.width);
-        output.metadata.properties["height"] = static_cast<uint64_t>(image.height);
-        output.metadata.properties["data_size"] = static_cast<uint64_t>(image.rgba.size());
-        output.metadata.properties["format"] = format_name;
-        output.metadata.properties["flip_vertical"] = false;
-        output.metadata.properties["generate_mipmaps"] = true;
-        output.metadata.properties["filter"] = std::string{ "linear" };
-        output.metadata.properties["address_u"] = std::string{ "repeat" };
-        output.metadata.properties["address_v"] = std::string{ "repeat" };
-        output.metadata.properties["max_anisotropy"] = 8.0;
+        // Properties 是导入结果的描述，不是输入。
+        output.record.properties["width"] = static_cast<uint64_t>(image.width);
+        output.record.properties["height"] = static_cast<uint64_t>(image.height);
+        output.record.properties["data_size"] = static_cast<uint64_t>(image.rgba.size());
+        output.record.properties["format"] = std::string{ detail::textureFormatName(format) };
+        output.record.properties["generate_mipmaps"] = true;
 
         output.encoded = detail::encodeTextureArtifact(image.rgba, image.width, image.height,
                 format, true);

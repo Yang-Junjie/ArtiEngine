@@ -4,6 +4,6 @@ Project:
   Author: Unknown
   Description: An ArtiChoco project.
   StartScene: Assets/Scenes/test.artiscene
-  LastOpenScene: Assets/Scenes/test.artiscene
+  LastOpenScene: Assets/Scenes/1.artiscene
   AssetsPath: Assets
   ArtifactsPath: Library/Artifacts

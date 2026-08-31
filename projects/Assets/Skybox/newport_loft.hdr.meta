@@ -1,19 +1,26 @@
-Asset:
-  Handle: b3295fb8fcd5b670
-  Type: artiengine.asset.texture
-  SourcePath: Skybox/newport_loft.hdr
-  ArtifactPath: Imported/b3295fb8fcd5b670.artitexture
-  Properties:
-    importer: !arti/string artiengine.TextureImporter
-    filter: !arti/string linear
-    data_size: !arti/uint 10240000
-    width: !arti/uint 1600
-    format: !arti/string RGBA16Float
-    height: !arti/uint 800
-    flip_vertical: !arti/bool false
-    generate_mipmaps: !arti/bool true
-    address_u: !arti/string repeat
-    address_v: !arti/string repeat
-    max_anisotropy: !arti/double 8
-  Dependencies:
-    []
+Version: 2
+Source:
+  Path: Skybox/newport_loft.hdr
+  ContentHash: 0
+  Size: 3843910
+Importer:
+  Name: artiengine.TextureImporter
+  Version: 1
+Settings:
+  Authored:
+    {}
+  Inferred:
+    {}
+  ResolvedHash: 5240228856541172191
+Assets:
+  - LocalId: ""
+    Handle: 898b72c7c0394447
+    Type: artiengine.asset.texture
+    ArtifactPath: Imported/898b72c7c0394447.artitexture
+    Properties:
+      width: !arti/uint 1600
+      data_size: !arti/uint 10240000
+      height: !arti/uint 800
+      format: !arti/string RGBA16Float
+      generate_mipmaps: !arti/bool true
+    Dependencies: []

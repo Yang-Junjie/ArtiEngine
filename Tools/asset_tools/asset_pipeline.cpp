@@ -2,6 +2,7 @@
 
 #include "asset/builtin_assets.h"
 #include "asset/importers/gltf_importer.h"
+#include "asset/importers/material_importer.h"
 #include "asset/importers/obj_importer.h"
 #include "asset/importers/texture_importer.h"
 #include "asset/loaders/material_loader.h"
@@ -9,8 +10,10 @@
 #include "asset/loaders/prefab_loader.h"
 #include "asset/loaders/texture_loader.h"
 
+#include "asset/material_asset.h"
+
 #include <algorithm>
-#include <cctype>
+#include <fstream>
 #include <ranges>
 #include <stdexcept>
 #include <system_error>
@@ -18,34 +21,6 @@
 #include <utility>
 
 namespace arti::tools::asset {
-namespace {
-
-std::string normalizedExtension(std::string extension) {
-    if (!extension.empty() && extension.front() != '.') {
-        extension.insert(extension.begin(), '.');
-    }
-    std::ranges::transform(extension, extension.begin(),
-            [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-    return extension;
-}
-
-bool belongsToSource(const std::filesystem::path& candidate, const std::filesystem::path& source) {
-    const std::string candidate_text = candidate.lexically_normal().generic_string();
-    const std::string source_text = source.lexically_normal().generic_string();
-    return candidate_text == source_text ||
-           (candidate_text.size() > source_text.size() && candidate_text.starts_with(source_text) &&
-                   candidate_text[source_text.size()] == '.');
-}
-
-size_t typeRank(std::string_view type, std::span<const std::string_view> preferred_types) {
-    const auto found = std::ranges::find(preferred_types, type);
-    return found == preferred_types.end()
-                   ? preferred_types.size()
-                   : static_cast<size_t>(std::distance(preferred_types.begin(), found));
-}
-
-} // namespace
-
 AssetPipeline::~AssetPipeline() { close(); }
 
 bool AssetPipeline::open(const std::filesystem::path& assets_root,
@@ -70,9 +45,10 @@ bool AssetPipeline::open(const std::filesystem::path& assets_root,
             m_manager->registerLoader(std::make_unique<engine::asset::TextureLoader>()) &&
             m_manager->registerLoader(std::make_unique<engine::asset::PrefabLoader>());
     const bool importers_registered =
-            registerImporter(std::make_unique<engine::asset::ObjImporter>()) &&
-            registerImporter(std::make_unique<engine::asset::GltfImporter>()) &&
-            registerImporter(std::make_unique<engine::asset::TextureImporter>());
+            m_manager->registerImporter(std::make_unique<engine::asset::ObjImporter>()) &&
+            m_manager->registerImporter(std::make_unique<engine::asset::GltfImporter>()) &&
+            m_manager->registerImporter(std::make_unique<engine::asset::TextureImporter>()) &&
+            m_manager->registerImporter(std::make_unique<engine::asset::MaterialImporter>());
     if (!loaders_registered || !importers_registered ||
             !engine::asset::ensureBuiltinAssets(*m_manager)) {
         close();
@@ -80,7 +56,6 @@ bool AssetPipeline::open(const std::filesystem::path& assets_root,
     }
 
     m_assets_root = normalized_assets;
-    refreshMetadata();
     return true;
 }
 
@@ -89,54 +64,21 @@ void AssetPipeline::close() noexcept {
         m_manager->close();
     }
     m_manager.reset();
-    m_importers.clear();
     m_assets_root.clear();
-    m_metadata.clear();
-    m_source_cache.clear();
+    m_by_source.clear();
+    m_cache_valid = false;
+    m_cached_revision = 0;
 }
 
 bool AssetPipeline::isOpen() const noexcept {
     return m_manager != nullptr && m_manager->storage().isOpen();
 }
 
-bool AssetPipeline::registerImporter(std::unique_ptr<arti::asset::AssetImporter> importer) {
-    if (!importer || m_manager == nullptr) {
-        return false;
-    }
-
-    std::vector<std::string> extensions;
-    try {
-        extensions = importer->getSupportedExtensions();
-    } catch (...) {
-        return false;
-    }
-
-    auto* registered = importer.get();
-    if (!m_manager->registerImporter(std::move(importer))) {
-        return false;
-    }
-    for (std::string extension: extensions) {
-        extension = normalizedExtension(std::move(extension));
-        if (extension.empty() || !m_importers.emplace(std::move(extension), registered).second) {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool AssetPipeline::canImport(const std::filesystem::path& relative_path) const {
-    if (!arti::asset::isSafeAssetRelativePath(relative_path)) {
-        return false;
-    }
-    return m_importers.contains(normalizedExtension(relative_path.extension().string()));
+    return isOpen() && m_manager->canImport(relative_path);
 }
 
 AssetImportSummary AssetPipeline::importFile(const std::filesystem::path& relative_path) {
-    return importFile(relative_path, true);
-}
-
-AssetImportSummary AssetPipeline::importFile(const std::filesystem::path& relative_path,
-        bool refresh_metadata) {
     AssetImportSummary summary;
     if (!isOpen()) {
         summary.error = "the asset workspace is not open";
@@ -146,156 +88,311 @@ AssetImportSummary AssetPipeline::importFile(const std::filesystem::path& relati
         summary.error = "the source path is not a safe Assets-relative path";
         return summary;
     }
-
-    const auto importer = m_importers.find(normalizedExtension(relative_path.extension().string()));
-    if (importer == m_importers.end()) {
+    if (!m_manager->canImport(relative_path)) {
         summary.status = AssetImportStatus::Unsupported;
         summary.error = "no importer supports this source extension";
         return summary;
     }
 
-    const auto results = m_manager->import(relative_path.lexically_normal(), *importer->second);
-    if (results.empty()) {
-        summary.error = "the asset manager did not produce an import result";
+    const auto result = m_manager->import(relative_path.lexically_normal());
+    if (!result) {
+        summary.error = result.error;
         return summary;
     }
-    for (const auto& result: results) {
-        if (!result) {
-            summary.error = result.error;
-            return summary;
-        }
-        summary.output_count += result.outputs.size();
-    }
-
     summary.status = AssetImportStatus::Imported;
-    if (refresh_metadata) {
-        refreshMetadata();
-    }
+    summary.output_count = result.outputs.size();
     return summary;
 }
 
-AssetScanSummary AssetPipeline::importPending() {
-    AssetScanSummary summary;
+arti::asset::ReconcilePlan AssetPipeline::planReconcile() const {
     if (!isOpen()) {
-        summary.traversal_error = "the asset workspace is not open";
-        return summary;
+        arti::asset::ReconcilePlan plan;
+        plan.traversal_error = "the asset workspace is not open";
+        return plan;
+    }
+    return m_manager->planReconcile();
+}
+
+arti::asset::ReconcileReport AssetPipeline::reconcile() {
+    if (!isOpen()) {
+        arti::asset::ReconcileReport report;
+        report.errors.emplace_back("the asset workspace is not open");
+        return report;
+    }
+    return m_manager->reconcile();
+}
+
+arti::asset::AssetIntegrityReport AssetPipeline::checkIntegrity() const {
+    if (!isOpen()) {
+        arti::asset::AssetIntegrityReport report;
+        report.issues.push_back({ {}, "the asset workspace is not open" });
+        return report;
+    }
+    return m_manager->checkIntegrity();
+}
+
+// catalog 变了就整表重建一次：O(资产数)，而不是每次查询都全量线性扫描。
+void AssetPipeline::invalidateCacheIfStale() const {
+    if (!isOpen()) {
+        m_by_source.clear();
+        m_cache_valid = false;
+        return;
+    }
+    const uint64_t revision = m_manager->catalog().revision();
+    if (m_cache_valid && revision == m_cached_revision) {
+        return;
     }
 
-    bool metadata_changed = false;
-    std::error_code error;
-    std::filesystem::recursive_directory_iterator iterator{ m_assets_root,
-        std::filesystem::directory_options::skip_permission_denied, error };
-    const std::filesystem::recursive_directory_iterator end;
-    while (!error && iterator != end) {
-        if (iterator->is_regular_file(error)) {
-            const auto& path = iterator->path();
-            if (normalizedExtension(path.extension().string()) !=
-                    arti::asset::kAssetMetadataExtension) {
-                ++summary.source_files;
-                const auto relative = std::filesystem::relative(path, m_assets_root, error);
-                if (!error) {
-                    if (!canImport(relative)) {
-                        ++summary.unsupported_files;
-                    } else if (isImported(relative)) {
-                        ++summary.current_files;
-                    } else {
-                        const auto imported = importFile(relative, false);
-                        if (imported.succeeded()) {
-                            ++summary.imported_files;
-                            metadata_changed = true;
-                        } else {
-                            ++summary.failed_files;
-                        }
-                    }
-                }
+    m_by_source.clear();
+    for (const arti::asset::AssetEntry& entry:
+            m_manager->catalog().entriesWithOrigin(arti::asset::AssetOrigin::User)) {
+        // 一源一 sidecar：source_path 就是拥有者，不需要回溯。
+        m_by_source[entry.metadata.source_path.lexically_normal().generic_string()]
+                .assets.push_back(entry.metadata);
+    }
+
+    for (auto& [source, bucket]: m_by_source) {
+        std::ranges::sort(bucket.assets,
+                [](const arti::asset::AssetMetadata& left,
+                        const arti::asset::AssetMetadata& right) {
+                    return std::tuple{ left.source_path.generic_string(), left.type,
+                               left.handle.value() } <
+                           std::tuple{ right.source_path.generic_string(), right.type,
+                               right.handle.value() };
+                });
+
+        bucket.state = SourceState::Imported;
+        for (const arti::asset::AssetMetadata& asset: bucket.assets) {
+            if (!m_manager->storage().hasArtifact(asset.artifact_path)) {
+                bucket.state = SourceState::Stale;
+                break;
             }
         }
-        iterator.increment(error);
     }
-    if (error) {
-        summary.traversal_error = error.message();
-    }
-    if (metadata_changed) {
-        refreshMetadata();
-    }
-    return summary;
+
+    m_cached_revision = revision;
+    m_cache_valid = true;
 }
 
-const std::vector<arti::asset::AssetMetadata>& AssetPipeline::sourceAssets(
-        const std::filesystem::path& relative_path) const {
-    static const std::vector<arti::asset::AssetMetadata> empty;
-    if (!arti::asset::isSafeAssetRelativePath(relative_path)) {
-        return empty;
+SourceAssets AssetPipeline::sourceAssets(const std::filesystem::path& relative_path) const {
+    if (!isOpen() || !arti::asset::isSafeAssetRelativePath(relative_path)) {
+        return {};
     }
+    invalidateCacheIfStale();
 
-    const auto normalized = relative_path.lexically_normal();
-    const std::string key = normalized.generic_string();
-    if (const auto found = m_source_cache.find(key); found != m_source_cache.end()) {
+    const std::string key = relative_path.lexically_normal().generic_string();
+    if (const auto found = m_by_source.find(key); found != m_by_source.end()) {
         return found->second;
     }
 
-    std::vector<arti::asset::AssetMetadata> matches;
-    for (const auto& entry: m_metadata) {
-        if (belongsToSource(entry.source_path, normalized)) {
-            matches.push_back(entry);
-        }
-    }
-    return m_source_cache.emplace(key, std::move(matches)).first->second;
+    // 没有任何资产归属它：要么还没导，要么根本导不了。这种情况不进缓存 ——
+    // 缓存只装"由 catalog 推导出来的"分组，未导入状态每次现算，成本是一次 map 查询。
+    SourceAssets pending;
+    pending.state = m_manager->canImport(relative_path) ? SourceState::Pending
+                                                       : SourceState::Unsupported;
+    return pending;
 }
 
 bool AssetPipeline::isImported(const std::filesystem::path& relative_path) const {
-    return !sourceAssets(relative_path).empty();
+    return !sourceAssets(relative_path).assets.empty();
 }
 
-std::vector<arti::asset::AssetMetadata> AssetPipeline::findAssetsBySource(
-        const std::filesystem::path& relative_path) const {
-    return sourceAssets(relative_path);
-}
-
-std::optional<arti::asset::AssetMetadata> AssetPipeline::primaryAsset(
-        const std::filesystem::path& relative_path,
-        std::span<const std::string_view> preferred_types) const {
-    const auto& matches = sourceAssets(relative_path);
-    if (matches.empty()) {
-        return std::nullopt;
+SourceSettings AssetPipeline::sourceSettings(const std::filesystem::path& relative_path) const {
+    SourceSettings settings;
+    if (!isOpen() || !arti::asset::isSafeAssetRelativePath(relative_path)) {
+        return settings;
+    }
+    const auto* importer = m_manager->importerFor(relative_path);
+    if (importer == nullptr) {
+        return settings;
     }
 
-    const auto normalized = relative_path.lexically_normal();
-    const auto best = std::ranges::min_element(matches,
-            [&normalized, preferred_types](const auto& left, const auto& right) {
-                const auto key = [&normalized, preferred_types](const auto& entry) {
-                    return std::tuple{ typeRank(entry.type, preferred_types),
-                        entry.source_path.lexically_normal() == normalized ? 0 : 1,
-                        entry.source_path.generic_string(), entry.type, entry.handle.value() };
-                };
-                return key(left) < key(right);
-            });
-    return *best;
+    settings.schema = importer->getSettingSchema();
+    if (const auto sidecar = m_manager->storage().readMetadata(relative_path)) {
+        settings.stored = sidecar->settings;
+    }
+    settings.resolved = arti::asset::resolveSettings(settings.schema, settings.stored);
+    settings.valid = true;
+    return settings;
 }
 
-AssetValidationSummary AssetPipeline::validate() const {
-    AssetValidationSummary summary;
-    summary.assets_checked = m_metadata.size();
+bool AssetPipeline::setAuthoredSetting(const std::filesystem::path& relative_path,
+        const std::string& key, const std::optional<arti::asset::Value>& value) {
     if (!isOpen()) {
-        summary.issues.push_back({ {}, "the asset workspace is not open" });
-        return summary;
+        return false;
+    }
+    const auto sidecar = m_manager->storage().readMetadata(relative_path);
+    if (!sidecar) {
+        return false;
     }
 
-    for (const auto& entry: m_metadata) {
-        std::error_code error;
-        const auto artifact = m_manager->storage().resolveArtifactPath(entry.artifact_path);
-        if (!artifact || !std::filesystem::is_regular_file(*artifact, error) || error) {
-            summary.issues.push_back(
-                    { entry.handle, "missing artifact: " + entry.artifact_path.generic_string() });
+    arti::asset::SourceMetadata updated = *sidecar;
+    if (value) {
+        updated.settings.authored[key] = *value;
+    } else {
+        // 删除键而不是写入默认值 —— "键的存在"本身是信息，缺失表示
+        // "未指定、往下层取"，写入默认值会永久压住推断。
+        updated.settings.authored.erase(key);
+    }
+    if (!m_manager->storage().writeMetadata(updated)) {
+        return false;
+    }
+    // 设置变了就重导入，artifact 才会按新设置重新编码。
+    return importFile(relative_path).succeeded();
+}
+
+AssetPipeline::ExtractResult AssetPipeline::extractMaterial(core::UUID material,
+        const std::filesystem::path& destination) {
+    ExtractResult result;
+    if (!isOpen()) {
+        result.error = "the asset workspace is not open";
+        return result;
+    }
+
+    const auto metadata = m_manager->catalog().find(material);
+    if (!metadata) {
+        result.error = "no such asset in the catalog";
+        return result;
+    }
+    if (metadata->type != engine::asset::kMaterialAssetType) {
+        result.error = "only materials can be extracted";
+        return result;
+    }
+    if (metadata->local_id.empty()) {
+        // local_id 为空说明它本来就是独立 Root 资产（比如已经是 .artimaterial）。
+        result.error = "this material is already a standalone source asset";
+        return result;
+    }
+
+    // 提取物要复制派生材质当前的参数，所以得先把它加载出来。
+    const auto loaded = m_manager->load<engine::asset::MaterialAsset>(material);
+    if (!loaded) {
+        result.error = "failed to load the material";
+        return result;
+    }
+
+    // artifact 里存的是纹理 UUID，源文件用路径引用（人可读、可 diff），
+    // 所以要反查回去。查不到的槽位留空。
+    const auto referenceFor = [this](core::UUID texture) -> std::string {
+        if (!texture.isValid()) {
+            return {};
         }
-        for (const core::UUID dependency: entry.dependencies) {
-            if (!m_manager->catalog().find(dependency)) {
-                summary.issues.push_back(
-                        { entry.handle, "missing dependency: " + dependency.toString() });
-            }
+        const auto found = m_manager->catalog().find(texture);
+        if (!found) {
+            return {};
+        }
+        std::string text = found->source_path.generic_string();
+        if (!found->local_id.empty()) {
+            text += "#" + found->local_id;
+        }
+        return text;
+    };
+
+    const auto& params = loaded->params();
+    engine::asset::MaterialSourceTextures textures;
+    textures.base_color = referenceFor(params.base_color_texture.id());
+    textures.metallic_roughness = referenceFor(params.metallic_roughness_texture.id());
+    textures.normal = referenceFor(params.normal_texture.id());
+    textures.occlusion = referenceFor(params.occlusion_texture.id());
+    textures.emissive = referenceFor(params.emissive_texture.id());
+
+    std::filesystem::path target = destination;
+    if (target.empty()) {
+        // 默认落在 Materials/ 下，用容器名 + local_id 避免撞名。
+        target = std::filesystem::path{ "Materials" } /
+                 (metadata->source_path.stem().string() + "_" + metadata->local_id +
+                         ".artimaterial");
+    }
+    if (!arti::asset::isSafeAssetRelativePath(target)) {
+        result.error = "the destination is not a safe Assets-relative path";
+        return result;
+    }
+    if (m_manager->storage().hasSource(target)) {
+        result.error = "the destination already exists: " + target.generic_string();
+        return result;
+    }
+
+    const auto absolute = m_manager->storage().resolveSourcePath(target);
+    if (!absolute) {
+        result.error = "failed to resolve the destination path";
+        return result;
+    }
+    std::error_code error;
+    std::filesystem::create_directories(absolute->parent_path(), error);
+    if (error) {
+        result.error = "failed to create the destination directory: " + error.message();
+        return result;
+    }
+    {
+        std::ofstream output{ *absolute, std::ios::binary | std::ios::trunc };
+        output << engine::asset::writeMaterialSource(params, textures);
+        if (!output.good()) {
+            result.error = "failed to write " + target.generic_string();
+            return result;
         }
     }
-    return summary;
+
+    // 在容器的 sidecar 里记下覆盖，这样重导入之后 prefab 仍然指向提取物。
+    auto sidecar = m_manager->storage().readMetadata(metadata->source_path);
+    if (!sidecar) {
+        result.error = "failed to read the container sidecar";
+        return result;
+    }
+    sidecar->settings.authored[engine::asset::GltfImporter::kExtractedMaterialPrefix +
+            metadata->local_id] = target.generic_string();
+    if (!m_manager->storage().writeMetadata(*sidecar)) {
+        result.error = "failed to record the extraction in the container sidecar";
+        return result;
+    }
+
+    // 提取物先导入，容器才能引用它的 handle；然后重导容器让 prefab 改指向。
+    if (!importFile(target).succeeded()) {
+        result.error = "failed to import the extracted material";
+        return result;
+    }
+    if (!importFile(metadata->source_path).succeeded()) {
+        result.error = "failed to reimport the container";
+        return result;
+    }
+
+    const auto extracted = m_manager->catalog().findBySourceAndLocalId(target, std::string{});
+    if (!extracted) {
+        result.error = "the extracted material did not register in the catalog";
+        return result;
+    }
+
+    result.succeeded = true;
+    result.source_path = target;
+    result.handle = extracted->handle;
+    return result;
+}
+
+std::vector<arti::asset::AssetEntry> AssetPipeline::engineAssets() const {
+    if (!isOpen()) {
+        return {};
+    }
+    auto entries = m_manager->catalog().entriesWithOrigin(arti::asset::AssetOrigin::Engine);
+    std::ranges::sort(entries,
+            [](const arti::asset::AssetEntry& left, const arti::asset::AssetEntry& right) {
+                return left.metadata.source_path.generic_string() <
+                       right.metadata.source_path.generic_string();
+            });
+    return entries;
+}
+
+std::vector<arti::asset::AssetMetadata> AssetPipeline::allMetadata() const {
+    if (!isOpen()) {
+        return {};
+    }
+    auto metadata = m_manager->catalog().allMetadata();
+    std::ranges::sort(metadata,
+            [](const arti::asset::AssetMetadata& left, const arti::asset::AssetMetadata& right) {
+                return std::tuple{ left.source_path.generic_string(), left.type,
+                           left.handle.value() } <
+                       std::tuple{ right.source_path.generic_string(), right.type,
+                           right.handle.value() };
+            });
+    return metadata;
 }
 
 arti::asset::AssetManager& AssetPipeline::manager() {
@@ -310,15 +407,6 @@ const arti::asset::AssetManager& AssetPipeline::manager() const {
         throw std::logic_error("AssetPipeline is not open");
     }
     return *m_manager;
-}
-
-void AssetPipeline::refreshMetadata() {
-    m_metadata = m_manager->catalog().allMetadata();
-    std::ranges::sort(m_metadata, [](const auto& left, const auto& right) {
-        return std::tuple{ left.source_path.generic_string(), left.type, left.handle.value() } <
-               std::tuple{ right.source_path.generic_string(), right.type, right.handle.value() };
-    });
-    m_source_cache.clear();
 }
 
 } // namespace arti::tools::asset

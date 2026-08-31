@@ -7,7 +7,12 @@
 #include "asset/mesh_asset.h"
 
 #include <array>
+#include <cstddef>
+#include <filesystem>
 #include <glm/geometric.hpp>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace arti::engine::asset {
 namespace {
@@ -66,67 +71,79 @@ CubeGeometry makeCube() {
     return cube;
 }
 
-bool writeBuiltin(arti::asset::AssetManager& assets, core::UUID handle, std::string_view type,
-        const std::filesystem::path& source_path, const std::filesystem::path& artifact_path,
-        const std::vector<std::byte>& artifact) {
-    if (!assets.storage().writeArtifact(artifact_path, artifact)) {
-        return false;
-    }
+std::vector<std::byte> encodeCube() {
+    const auto cube = makeCube();
+    rendering::Submesh submesh;
+    submesh.index_offset = 0;
+    submesh.index_count = static_cast<uint32_t>(cube.indices.size());
+    submesh.vertex_offset = 0;
+    submesh.vertex_count = static_cast<uint32_t>(cube.vertices.size());
+    submesh.material_index = 0;
 
-    arti::asset::AssetMetadata metadata;
-    metadata.handle = handle;
-    metadata.type = std::string{ type };
-    metadata.source_path = source_path;
-    metadata.artifact_path = artifact_path;
+    return detail::encodeMeshArtifact(cube.vertices, cube.indices, { submesh }, { "Default" });
+}
 
-    if (!assets.storage().writeMetadata(metadata)) {
-        return false;
-    }
-    assets.catalog().insert(std::move(metadata));
-    return true;
+std::vector<std::byte> encodeDefaultMaterial() {
+    MaterialAsset::Params params;
+    params.type = rendering::MaterialType::PBR;
+    params.roughness_strength = 0.5f;
+    params.metallic_strength = 1.0f;
+    return encodeMaterialArtifact(params);
+}
+
+struct BuiltinDescriptor {
+    core::UUID handle;
+    std::string_view type;
+    // 展示用的虚拟身份，Assets/ 下并不存在这个文件，也不会为它写 .meta。
+    std::filesystem::path source_path;
+    std::filesystem::path artifact_path;
+    std::vector<std::byte> (*encode)();
+};
+
+std::vector<BuiltinDescriptor> builtinDescriptors() {
+    return {
+        { kBuiltinCubeMesh, kMeshAssetType, "Builtin/Cube.mesh",
+            std::filesystem::path{ "Builtin" } / "Cube.mesh", &encodeCube },
+        { kBuiltinDefaultMaterial, kMaterialAssetType, "Builtin/Default.material",
+            std::filesystem::path{ "Builtin" } / "Default.material", &encodeDefaultMaterial },
+    };
 }
 
 }
 
+// builtin 资产的身份全部是编译期常量，所以磁盘上不需要 .meta —— 写了反而让
+// 派生数据有权覆盖代码里的定义，还会污染用户的 Assets/ 与版本库。
+// 这里每次都按 artifact 是否真的存在来决定是否重新生成，从而保证
+// Library/ 被整个删掉后仍然能自愈。
 bool ensureBuiltinAssets(arti::asset::AssetManager& assets) {
-    const bool cube_present = assets.catalog().find(kBuiltinCubeMesh).has_value();
-    const bool pbr_present = assets.catalog().find(kBuiltinDefaultMaterial).has_value();
-    if (cube_present && pbr_present) {
-        return true;
-    }
+    // 同时注册成 provider，让后续每轮 reconcile 走同一条自愈路径。
+    assets.registerEngineAssetProvider(
+            [](arti::asset::AssetManager& manager) { return restoreBuiltinAssets(manager); });
+    return restoreBuiltinAssets(assets);
+}
 
+bool restoreBuiltinAssets(arti::asset::AssetManager& assets) {
     bool ok = true;
+    for (const BuiltinDescriptor& builtin: builtinDescriptors()) {
+        if (!assets.storage().hasArtifact(builtin.artifact_path)) {
+            if (!assets.storage().writeArtifact(builtin.artifact_path, builtin.encode())) {
+                ok = false;
+                continue;
+            }
+        }
 
-    if (!cube_present) {
-        const auto cube = makeCube();
-        std::vector<rendering::Submesh> submeshes;
-        rendering::Submesh submesh;
-        submesh.index_offset = 0;
-        submesh.index_count = static_cast<uint32_t>(cube.indices.size());
-        submesh.vertex_offset = 0;
-        submesh.vertex_count = static_cast<uint32_t>(cube.vertices.size());
-        submesh.material_index = 0;
-        submeshes.push_back(submesh);
+        arti::asset::AssetMetadata metadata;
+        metadata.handle = builtin.handle;
+        metadata.type = std::string{ builtin.type };
+        // local_id 空：builtin 的虚拟源路径本身就唯一标识它。
+        metadata.source_path = builtin.source_path;
+        metadata.artifact_path = builtin.artifact_path;
 
-        const auto artifact =
-                detail::encodeMeshArtifact(cube.vertices, cube.indices, submeshes, { "Default" });
-        ok = writeBuiltin(assets, kBuiltinCubeMesh, kMeshAssetType, "Builtin/Cube.mesh",
-                     std::filesystem::path{ "Builtin" } / "Cube.mesh", artifact) &&
-             ok;
+        if (assets.catalog().insert(std::move(metadata), arti::asset::AssetOrigin::Engine) ==
+                arti::asset::AssetInsertStatus::Conflicted) {
+            ok = false;
+        }
     }
-
-    if (!pbr_present) {
-        MaterialAsset::Params params;
-        params.type = rendering::MaterialType::PBR;
-        params.roughness_strength = 0.5f;
-        params.metallic_strength = 1.0f;
-        const auto artifact = encodeMaterialArtifact(params);
-        ok = writeBuiltin(assets, kBuiltinDefaultMaterial, kMaterialAssetType,
-                     "Builtin/Default.material",
-                     std::filesystem::path{ "Builtin" } / "Default.material", artifact) &&
-             ok;
-    }
-
     return ok;
 }
 

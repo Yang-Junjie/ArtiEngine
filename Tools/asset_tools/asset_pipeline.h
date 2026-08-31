@@ -25,27 +25,27 @@ struct AssetImportSummary {
     bool succeeded() const noexcept { return status == AssetImportStatus::Imported; }
 };
 
-struct AssetScanSummary {
-    size_t source_files{ 0 };
-    size_t imported_files{ 0 };
-    size_t current_files{ 0 };
-    size_t unsupported_files{ 0 };
-    size_t failed_files{ 0 };
-    std::string traversal_error;
-
-    bool succeeded() const noexcept { return traversal_error.empty() && failed_files == 0; }
+// 一个源文件在 Content Browser 里的状态。
+enum class SourceState : uint8_t {
+    Imported,     // 已导入，assets 非空
+    Pending,      // 可导入但还没导
+    Unsupported,  // 没有 importer 认领
+    Stale         // 已登记但 artifact 缺失，需要重导
 };
 
-struct AssetValidationIssue {
-    core::UUID asset;
-    std::string message;
+struct SourceAssets {
+    SourceState state{ SourceState::Unsupported };
+    std::vector<arti::asset::AssetMetadata> assets;
 };
 
-struct AssetValidationSummary {
-    size_t assets_checked{ 0 };
-    std::vector<AssetValidationIssue> issues;
-
-    bool succeeded() const noexcept { return issues.empty(); }
+// 一个源文件的导入设置，供 Inspector 编辑。
+struct SourceSettings {
+    std::vector<arti::asset::SettingDescriptor> schema;
+    // 解析后的有效值，以及每个键来自哪一层。
+    arti::asset::ResolvedSettings resolved;
+    // 磁盘上原样存着的 Authored/Inferred。写回时只改 authored。
+    arti::asset::AssetSettings stored;
+    bool valid{ false };
 };
 
 // CPU-side asset workspace shared by editor frontends and command-line tools.
@@ -65,34 +65,59 @@ public:
 
     bool canImport(const std::filesystem::path& relative_path) const;
     AssetImportSummary importFile(const std::filesystem::path& relative_path);
-    AssetScanSummary importPending();
 
+    // 三方对账。plan 只读，可以直接当 UI 视图；reconcile 是 plan + apply。
+    arti::asset::ReconcilePlan planReconcile() const;
+    arti::asset::ReconcileReport reconcile();
+
+    arti::asset::AssetIntegrityReport checkIntegrity() const;
+
+    // 某个源文件（含其子资产）的状态。分组表按 catalog revision 缓存，但这里
+    // 按值返回：调用方常常在拿到结果之后又调 importFile()，那会撞 revision 并
+    // 让缓存重建，引用会失效。
+    SourceAssets sourceAssets(const std::filesystem::path& relative_path) const;
     bool isImported(const std::filesystem::path& relative_path) const;
-    std::vector<arti::asset::AssetMetadata> findAssetsBySource(
-            const std::filesystem::path& relative_path) const;
-    std::optional<arti::asset::AssetMetadata> primaryAsset(
-            const std::filesystem::path& relative_path,
-            std::span<const std::string_view> preferred_types) const;
 
-    std::span<const arti::asset::AssetMetadata> metadata() const noexcept { return m_metadata; }
-    AssetValidationSummary validate() const;
+    // 某个源文件的导入设置。schema 为空表示这个 importer 没有可调设置。
+    SourceSettings sourceSettings(const std::filesystem::path& relative_path) const;
+    // 写入一个 Authored 设置并立刻重导入该源文件。
+    // value 为 nullopt 表示"清除用户设定"，回落到 inferred / default。
+    bool setAuthoredSetting(const std::filesystem::path& relative_path, const std::string& key,
+            const std::optional<arti::asset::Value>& value);
+
+    struct ExtractResult {
+        bool succeeded{ false };
+        std::filesystem::path source_path;  // 新建的 .artimaterial（Assets-relative）
+        core::UUID handle;                  // 提取物的 handle（导入后）
+        std::string error;
+    };
+
+    // 把容器产出的派生材质提取成独立的 .artimaterial 源文件，并在容器的
+    // sidecar 里记下覆盖，使 prefab 在重导入之后仍指向提取物。
+    //
+    // 这是"派生资产只读"的必然出口：用户想改 glTF 带来的材质，就把它变成
+    // 自己拥有的 Root 资产。destination 为空时自动放在 Materials/ 下。
+    ExtractResult extractMaterial(core::UUID material,
+            const std::filesystem::path& destination = {});
+
+    // 引擎自带资产，不属于任何用户源文件。
+    std::vector<arti::asset::AssetEntry> engineAssets() const;
+
+    std::vector<arti::asset::AssetMetadata> allMetadata() const;
 
     arti::asset::AssetManager& manager();
     const arti::asset::AssetManager& manager() const;
 
 private:
-    bool registerImporter(std::unique_ptr<arti::asset::AssetImporter> importer);
-    AssetImportSummary importFile(const std::filesystem::path& relative_path,
-            bool refresh_metadata);
-    void refreshMetadata();
-    const std::vector<arti::asset::AssetMetadata>& sourceAssets(
-            const std::filesystem::path& relative_path) const;
+    void invalidateCacheIfStale() const;
 
     std::unique_ptr<arti::asset::AssetManager> m_manager;
-    std::unordered_map<std::string, arti::asset::AssetImporter*> m_importers;
     std::filesystem::path m_assets_root;
-    std::vector<arti::asset::AssetMetadata> m_metadata;
-    mutable std::unordered_map<std::string, std::vector<arti::asset::AssetMetadata>> m_source_cache;
+
+    // source_path → 归属它的资产。整表按 catalog revision 重建，查询 O(1)。
+    mutable std::unordered_map<std::string, SourceAssets> m_by_source;
+    mutable uint64_t m_cached_revision{ 0 };
+    mutable bool m_cache_valid{ false };
 };
 
 } // namespace arti::tools::asset

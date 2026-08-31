@@ -1,5 +1,9 @@
 #include "asset/importers/obj_importer.h"
 
+#include "asset/importers/detail/local_id.h"
+#include "asset/importers/detail/mtl_scan.h"
+#include "asset/importers/texture_importer.h"
+
 #include "asset/detail/mesh_artifact.h"
 #include "asset/detail/prefab_artifact.h"
 #include "asset/detail/texture_artifact.h"
@@ -175,12 +179,34 @@ std::vector<std::string> ObjImporter::getSupportedExtensions() const {
     return { ".obj" };
 }
 
-std::vector<std::byte> ObjImporter::encode(const arti::asset::AssetMetadata&,
-        const std::filesystem::path&) const {
-    throw std::logic_error("ObjImporter produces artifacts directly in import().");
+arti::asset::SourcePrescan ObjImporter::prescan(
+        const std::filesystem::path& source_path) const {
+    arti::asset::SourcePrescan prescan;
+    try {
+        const auto file = resolveSourceFile(source_path);
+        for (const auto& usage: detail::scanMtlTextures(file)) {
+            // 贴图可能落在 Assets/ 外面；那种情况无法当资产引用，
+            // 交给 import() 自己解码。
+            const auto relative = m_storage->relativeSourcePath(usage.file);
+            if (!relative) {
+                continue;
+            }
+            prescan.referenced_sources.push_back(*relative);
+            prescan.suggestions.push_back({ *relative,
+                std::string{ TextureImporter::kColorspaceSetting },
+                std::string{ usage.is_color ? TextureImporter::kColorspaceSrgb
+                                            : TextureImporter::kColorspaceLinear },
+                usage.usage });
+        }
+    } catch (...) {
+        return {};
+    }
+    return prescan;
 }
 
-arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& source_path) {
+arti::asset::AssetImportResult ObjImporter::import(
+        const arti::asset::AssetImportRequest& request) {
+    const std::filesystem::path& source_path = request.source_path;
     arti::asset::AssetImportResult result;
     try {
         const auto file = resolveSourceFile(source_path);
@@ -204,6 +230,9 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
             return result;
         }
 
+        // local_id 用源文件里的名字，不用下标 —— 见 local_id.h。
+        detail::LocalIdAllocator ids;
+
         std::unordered_map<std::string, core::UUID> texture_handles;
         const auto importTexture = [&](const std::string& texname,
                                             rendering::TextureFormat format) -> core::UUID {
@@ -215,19 +244,31 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
                 return existing->second;
             }
 
-            const auto texture_file = file.parent_path() / texname;
+            const auto texture_file = (file.parent_path() / texname).lexically_normal();
             std::error_code error;
             if (!std::filesystem::is_regular_file(texture_file, error)) {
                 return {};
             }
 
-            auto output = startOutput(source_path, ".texture." + texname, kTextureAssetType,
-                    ".artitexture");
+            // 贴图文件本身就是一个纹理资产（由 TextureImporter 导入），
+            // 这里引用它的产出而不是再解码一份。颜色空间正确性由 prescan
+            // 的推断保证。拓扑序让贴图先导入，所以这个查询通常命中；
+            // 查不到就退回自己解码。
+            if (const auto relative = m_storage->relativeSourcePath(texture_file)) {
+                if (const auto shared =
+                                m_catalog->findBySourceAndLocalId(*relative, std::string{})) {
+                    texture_handles.emplace(texname, shared->handle);
+                    return shared->handle;
+                }
+            }
+
+            auto output = startOutput(source_path, ids.allocate("texture", texname, 0),
+                    kTextureAssetType, ".artitexture");
             const auto image = detail::decodeImageFile(texture_file);
             output.encoded = detail::encodeTextureArtifact(image.rgba, image.width, image.height,
                     format, true);
 
-            const core::UUID handle = output.metadata.handle;
+            const core::UUID handle = output.record.handle;
             texture_handles.emplace(texname, handle);
             result.outputs.push_back(std::move(output));
             return handle;
@@ -237,7 +278,7 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
         material_handles.reserve(materials.size());
         for (size_t index = 0; index < materials.size(); ++index) {
             const auto& material = materials[index];
-            auto output = startOutput(source_path, ".material." + std::to_string(index),
+            auto output = startOutput(source_path, ids.allocate("material", material.name, index),
                     kMaterialAssetType, ".artimaterial");
 
             auto params = paramsFromMtl(material);
@@ -268,12 +309,12 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
             for (const core::UUID texture:
                     { base_color, normal, roughness, metallic, occlusion, emissive }) {
                 if (texture.isValid()) {
-                    output.metadata.dependencies.push_back(texture);
+                    output.record.dependencies.push_back(texture);
                 }
             }
             output.encoded = encodeMaterialArtifact(params);
 
-            material_handles.push_back(output.metadata.handle);
+            material_handles.push_back(output.record.handle);
             result.outputs.push_back(std::move(output));
         }
 
@@ -286,7 +327,7 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
                 continue;
             }
 
-            auto output = startOutput(source_path, ".mesh." + std::to_string(index),
+            auto output = startOutput(source_path, ids.allocate("mesh", parsed.name, index),
                     kMeshAssetType, ".artimesh");
 
             std::vector<rendering::Submesh> submeshes;
@@ -311,7 +352,7 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
 
             output.encoded = detail::encodeMeshArtifact(parsed.vertices, parsed.indices, submeshes,
                     slots);
-            mesh_handles.push_back(output.metadata.handle);
+            mesh_handles.push_back(output.record.handle);
             mesh_materials.push_back(std::move(slot_materials));
             result.outputs.push_back(std::move(output));
         }
@@ -321,7 +362,8 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
             return result;
         }
 
-        auto prefab_output = startOutput(source_path, ".prefab", kPrefabAssetType, ".artiprefab");
+        auto prefab_output = startOutput(source_path, "prefab", kPrefabAssetType,
+                ".artiprefab");
         std::vector<PrefabNode> nodes;
         nodes.reserve(mesh_handles.size() + 1);
 
@@ -340,10 +382,10 @@ arti::asset::AssetImportResult ObjImporter::import(const std::filesystem::path& 
         prefab_output.encoded = detail::encodePrefabArtifact(nodes);
 
         for (const core::UUID mesh: mesh_handles) {
-            prefab_output.metadata.dependencies.push_back(mesh);
+            prefab_output.record.dependencies.push_back(mesh);
         }
         for (const core::UUID material: material_handles) {
-            prefab_output.metadata.dependencies.push_back(material);
+            prefab_output.record.dependencies.push_back(material);
         }
         result.outputs.push_back(std::move(prefab_output));
     } catch (const std::exception& exception) {

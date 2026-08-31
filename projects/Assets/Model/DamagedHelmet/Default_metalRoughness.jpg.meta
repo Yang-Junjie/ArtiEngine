@@ -1,19 +1,29 @@
-Asset:
-  Handle: ff3d4f5c9eba8e99
-  Type: artiengine.asset.texture
-  SourcePath: Model/DamagedHelmet/Default_metalRoughness.jpg
-  ArtifactPath: Imported/ff3d4f5c9eba8e99.artitexture
-  Properties:
-    importer: !arti/string artiengine.TextureImporter
-    filter: !arti/string linear
-    data_size: !arti/uint 16777216
-    width: !arti/uint 2048
-    format: !arti/string RGBA8Srgb
-    height: !arti/uint 2048
-    flip_vertical: !arti/bool false
-    generate_mipmaps: !arti/bool true
-    address_u: !arti/string repeat
-    address_v: !arti/string repeat
-    max_anisotropy: !arti/double 8
-  Dependencies:
-    []
+Version: 2
+Source:
+  Path: Model/DamagedHelmet/Default_metalRoughness.jpg
+  ContentHash: 0
+  Size: 1300661
+Importer:
+  Name: artiengine.TextureImporter
+  Version: 1
+Settings:
+  Authored:
+    {}
+  Inferred:
+    Colorspace:
+      Value: !arti/string linear
+      By: Model/DamagedHelmet/DamagedHelmet.gltf
+      Usage: metallic_roughness
+  ResolvedHash: 6851385285794684826
+Assets:
+  - LocalId: ""
+    Handle: cd2b56499fe5fbc0
+    Type: artiengine.asset.texture
+    ArtifactPath: Imported/cd2b56499fe5fbc0.artitexture
+    Properties:
+      width: !arti/uint 2048
+      data_size: !arti/uint 16777216
+      height: !arti/uint 2048
+      format: !arti/string RGBA8Unorm
+      generate_mipmaps: !arti/bool true
+    Dependencies: []

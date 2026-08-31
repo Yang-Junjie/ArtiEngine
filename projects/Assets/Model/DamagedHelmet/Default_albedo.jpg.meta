@@ -1,19 +1,29 @@
-Asset:
-  Handle: 4c20f7b884bd2da8
-  Type: artiengine.asset.texture
-  SourcePath: Model/DamagedHelmet/Default_albedo.jpg
-  ArtifactPath: Imported/4c20f7b884bd2da8.artitexture
-  Properties:
-    importer: !arti/string artiengine.TextureImporter
-    filter: !arti/string linear
-    data_size: !arti/uint 16777216
-    width: !arti/uint 2048
-    format: !arti/string RGBA8Srgb
-    height: !arti/uint 2048
-    flip_vertical: !arti/bool false
-    generate_mipmaps: !arti/bool true
-    address_u: !arti/string repeat
-    address_v: !arti/string repeat
-    max_anisotropy: !arti/double 8
-  Dependencies:
-    []
+Version: 2
+Source:
+  Path: Model/DamagedHelmet/Default_albedo.jpg
+  ContentHash: 0
+  Size: 935629
+Importer:
+  Name: artiengine.TextureImporter
+  Version: 1
+Settings:
+  Authored:
+    {}
+  Inferred:
+    Colorspace:
+      Value: !arti/string srgb
+      By: Model/DamagedHelmet/DamagedHelmet.gltf
+      Usage: base_color
+  ResolvedHash: 5240228856541172191
+Assets:
+  - LocalId: ""
+    Handle: 166bddf43a7f7709
+    Type: artiengine.asset.texture
+    ArtifactPath: Imported/166bddf43a7f7709.artitexture
+    Properties:
+      width: !arti/uint 2048
+      data_size: !arti/uint 16777216
+      height: !arti/uint 2048
+      format: !arti/string RGBA8Srgb
+      generate_mipmaps: !arti/bool true
+    Dependencies: []

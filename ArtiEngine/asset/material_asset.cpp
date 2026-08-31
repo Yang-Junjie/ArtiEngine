@@ -6,6 +6,12 @@ MaterialAsset::MaterialAsset(core::UUID handle, Params params)
         : Asset(handle),
           m_params(params) {}
 
+MaterialAsset::MaterialAsset(core::UUID handle, Params params,
+        std::vector<std::shared_ptr<arti::asset::Asset>> dependencies)
+        : Asset(handle),
+          m_params(params),
+          m_dependencies(std::move(dependencies)) {}
+
 arti::asset::AssetType MaterialAsset::getType() const { return std::string{ kMaterialAssetType }; }
 
 rendering::Material MaterialAsset::toRenderMaterial() const {

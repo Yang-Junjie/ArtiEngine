@@ -2,6 +2,8 @@
 
 #include "editor_project.h"
 
+#include "asset_tools/asset_pipeline.h"
+
 #include "asset/material_asset.h"
 #include "asset/mesh_asset.h"
 #include "asset/prefab_asset.h"
@@ -10,15 +12,18 @@
 #include "artichoco/project/project_manager.h"
 
 #include <algorithm>
-#include <array>
-#include <cctype>
 #include <filesystem>
 #include <imgui.h>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
 namespace arti::editor {
 namespace {
+
+constexpr ImVec4 kAssetColor{ 0.6f, 0.9f, 0.7f, 1.0f };
+constexpr ImVec4 kStaleColor{ 0.95f, 0.75f, 0.35f, 1.0f };
+constexpr ImVec4 kEngineColor{ 0.65f, 0.8f, 0.95f, 1.0f };
 
 std::string_view typeLabel(std::string_view type) {
     if (type == engine::asset::kMeshAssetType) {
@@ -40,6 +45,15 @@ std::string lower(std::string text) {
     std::ranges::transform(text, text.begin(),
             [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return text;
+}
+
+// 子资产的显示名就是它的 local_id（如 "mesh.helmet_LP"）。local_id 为空表示
+// 源文件本身就是唯一产出，那时显示文件名。
+std::string subAssetLabel(const arti::asset::AssetMetadata& metadata) {
+    if (!metadata.local_id.empty()) {
+        return metadata.local_id;
+    }
+    return metadata.source_path.filename().string();
 }
 
 } // namespace
@@ -66,19 +80,25 @@ void ContentBrowserPanel::draw() {
 
     drawHeader();
     drawDirectory(*assets_root);
+    drawImportSettings();
+    if (m_show_engine_assets && m_current_dir.empty()) {
+        drawEngineAssets();
+    }
 
     ImGui::End();
 }
 
 void ContentBrowserPanel::drawHeader() {
-    if (ImGui::SmallButton("Refresh")) {
-        // 编辑器开着的时候往 Assets/ 里丢了文件，点一下扫进来。
-        m_project->assetPipeline().importPending();
+    if (ImGui::SmallButton("Reconcile")) {
+        // 三方对账：导入新文件、重导 artifact 缺失的、清掉源文件已删的孤儿。
+        m_project->assetPipeline().reconcile();
     }
     ImGui::SameLine();
     if (!m_current_dir.empty() && ImGui::SmallButton("Up")) {
         m_current_dir = m_current_dir.parent_path();
     }
+    ImGui::SameLine();
+    ImGui::Checkbox("Engine", &m_show_engine_assets);
     ImGui::SameLine();
 
     std::string breadcrumb = "Assets";
@@ -88,6 +108,40 @@ void ContentBrowserPanel::drawHeader() {
     }
     ImGui::TextDisabled("%s", breadcrumb.c_str());
     ImGui::Separator();
+}
+
+void ContentBrowserPanel::drawAssetRow(const arti::asset::AssetMetadata& metadata, bool nested) {
+    const bool selected = m_selected_asset && *m_selected_asset == metadata.handle;
+    const std::string label = typeLabel(metadata.type) == std::string_view{ "Asset" }
+                                      ? metadata.type
+                                      : std::string{ typeLabel(metadata.type) };
+
+    if (ImGui::Selectable("##asset", selected, ImGuiSelectableFlags_SpanAllColumns)) {
+        m_selected_asset = metadata.handle;
+    }
+    if (ImGui::BeginDragDropSource()) {
+        const auto value = metadata.handle.value();
+        ImGui::SetDragDropPayload(kAssetPayloadType, &value, sizeof(value));
+        ImGui::Text("%s", metadata.source_path.filename().string().c_str());
+        ImGui::EndDragDropSource();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s\n%s\nUUID: %s", metadata.source_path.generic_string().c_str(),
+                label.c_str(), metadata.handle.toString().c_str());
+    }
+
+    ImGui::TableSetColumnIndex(1);
+    ImGui::TextColored(nested ? kAssetColor : kEngineColor, "%s", label.c_str());
+
+    ImGui::TableSetColumnIndex(2);
+    const auto uuid = metadata.handle.toString();
+    ImGui::TextUnformatted(uuid.c_str());
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Click to copy the UUID");
+    }
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+        ImGui::SetClipboardText(uuid.c_str());
+    }
 }
 
 void ContentBrowserPanel::drawDirectory(const std::filesystem::path& assets_root) {
@@ -125,14 +179,15 @@ void ContentBrowserPanel::drawDirectory(const std::filesystem::path& assets_root
         return;
     }
     ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.0f);
-    ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+    ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 110.0f);
     ImGui::TableSetupColumn("UUID", ImGuiTableColumnFlags_WidthFixed, 170.0f);
     ImGui::TableHeadersRow();
 
+    auto& pipeline = m_project->assetPipeline();
     for (const Entry& entry: entries) {
         ImGui::TableNextRow();
-
         ImGui::TableSetColumnIndex(0);
+
         if (entry.is_directory) {
             if (ImGui::Selectable((entry.name + "/").c_str())) {
                 m_current_dir = entry.relative;
@@ -140,66 +195,180 @@ void ContentBrowserPanel::drawDirectory(const std::filesystem::path& assets_root
             continue;
         }
 
-        const auto info = assetInfoFor(entry.relative);
-        const bool selected =
-                info.imported && m_selected_asset && *m_selected_asset == info.primary_handle;
-        if (ImGui::Selectable(entry.name.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns)) {
-            m_selected_asset = info.imported ? std::optional{ info.primary_handle } : std::nullopt;
+        // 按值拿：下面可能调 importFile()，那会让 pipeline 的分组缓存重建。
+        const auto source = pipeline.sourceAssets(entry.relative);
+        const bool expandable = !source.assets.empty();
+
+        ImGui::PushID(entry.name.c_str());
+        bool open = false;
+        if (expandable) {
+            open = ImGui::TreeNodeEx("##source",
+                    ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen);
+            ImGui::SameLine();
         }
-        if (info.imported) {
-            if (ImGui::BeginDragDropSource()) {
-                const auto value = info.primary_handle.value();
-                ImGui::SetDragDropPayload(kAssetPayloadType, &value, sizeof(value));
-                ImGui::Text("%s", entry.name.c_str());
-                ImGui::EndDragDropSource();
-            }
-        }
-        if (ImGui::IsItemHovered() && info.imported) {
-            ImGui::SetTooltip("%s\n%s\nUUID: %s", entry.name.c_str(), info.type_label.c_str(),
-                    info.primary_handle.toString().c_str());
+        const bool source_selected = m_selected_source == entry.relative;
+        if (ImGui::Selectable(entry.name.c_str(), source_selected)) {
+            m_selected_source = entry.relative;
         }
 
         ImGui::TableSetColumnIndex(1);
-        if (info.imported) {
-            ImGui::TextColored(ImVec4{ 0.6f, 0.9f, 0.7f, 1.0f }, "%s", info.type_label.c_str());
-        } else if (!m_project->assetPipeline().canImport(entry.relative)) {
-            ImGui::TextDisabled("not importable");
-        } else {
+        switch (source.state) {
+        case tools::asset::SourceState::Imported:
+            ImGui::TextColored(kAssetColor, "%zu asset%s", source.assets.size(),
+                    source.assets.size() == 1 ? "" : "s");
+            ImGui::SameLine();
+            // 目前没有源文件变更检测，所以改完源文件只能手动点这里重导。
+            if (ImGui::SmallButton("Reimport")) {
+                pipeline.importFile(entry.relative);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Re-run the importer for this source file");
+            }
+            break;
+        case tools::asset::SourceState::Stale:
+            ImGui::TextColored(kStaleColor, "stale");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reimport")) {
+                pipeline.importFile(entry.relative);
+            }
+            break;
+        case tools::asset::SourceState::Pending:
             ImGui::TextDisabled("not imported");
             ImGui::SameLine();
             if (ImGui::SmallButton("Import")) {
-                m_project->assetPipeline().importFile(entry.relative);
+                pipeline.importFile(entry.relative);
             }
+            break;
+        case tools::asset::SourceState::Unsupported:
+            ImGui::TextDisabled("not importable");
+            break;
         }
 
-        ImGui::TableSetColumnIndex(2);
-        if (info.imported) {
-            const auto uuid = info.primary_handle.toString();
-            ImGui::TextUnformatted(uuid.c_str());
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Click to copy the UUID");
-            }
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-                ImGui::SetClipboardText(uuid.c_str());
+        if (open) {
+            for (const auto& asset: source.assets) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::PushID(static_cast<int>(asset.handle.value()));
+                ImGui::Indent();
+                ImGui::TextUnformatted(subAssetLabel(asset).c_str());
+                ImGui::SameLine();
+                drawAssetRow(asset, true);
+                ImGui::Unindent();
+                ImGui::PopID();
             }
         }
+        ImGui::PopID();
     }
     ImGui::EndTable();
 }
 
-ContentBrowserPanel::FileAssetInfo ContentBrowserPanel::assetInfoFor(
-        const std::filesystem::path& relative) const {
-    FileAssetInfo info;
-    // 复合导入时 prefab 优先，其次是 mesh。查询结果由 AssetPipeline 跨帧缓存。
-    constexpr std::array<std::string_view, 4> preferred_types{ engine::asset::kPrefabAssetType,
-        engine::asset::kMeshAssetType, engine::asset::kMaterialAssetType,
-        engine::asset::kTextureAssetType };
-    if (const auto primary = m_project->assetPipeline().primaryAsset(relative, preferred_types)) {
-        info.imported = true;
-        info.primary_handle = primary->handle;
-        info.type_label = std::string{ typeLabel(primary->type) };
+void ContentBrowserPanel::drawImportSettings() {
+    if (m_selected_source.empty()) {
+        return;
     }
-    return info;
+    auto& pipeline = m_project->assetPipeline();
+    const auto settings = pipeline.sourceSettings(m_selected_source);
+    if (!settings.valid || settings.schema.empty()) {
+        return;
+    }
+
+    ImGui::Separator();
+    const std::string header = "Import Settings: " + m_selected_source.filename().string();
+    if (!ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+
+    for (const auto& descriptor: settings.schema) {
+        const auto layer = settings.resolved.layerOf(descriptor.key);
+        const bool authored = layer == arti::asset::SettingLayer::Authored;
+        ImGui::PushID(descriptor.key.c_str());
+
+        // 字符串枚举：下拉框。其余类型等有 importer 真的需要时再加。
+        if (!descriptor.allowed.empty()) {
+            const std::string& current = settings.resolved.getString(descriptor.key);
+            if (ImGui::BeginCombo(descriptor.key.c_str(), current.c_str())) {
+                for (const auto& option: descriptor.allowed) {
+                    if (ImGui::Selectable(option.c_str(), option == current) &&
+                            option != current) {
+                        pipeline.setAuthoredSetting(m_selected_source, descriptor.key,
+                                arti::asset::Value{ option });
+                    }
+                }
+                ImGui::EndCombo();
+            }
+        } else {
+            ImGui::TextDisabled("%s (unsupported editor type)", descriptor.key.c_str());
+        }
+
+        // 显式标出这个值来自哪一层：用户设的、容器推断的、还是默认。
+        ImGui::SameLine();
+        switch (layer) {
+        case arti::asset::SettingLayer::Authored:
+            ImGui::TextColored(kStaleColor, "authored");
+            break;
+        case arti::asset::SettingLayer::Inferred: {
+            ImGui::TextColored(kEngineColor, "inferred");
+            const auto found = settings.stored.inferred.find(descriptor.key);
+            if (ImGui::IsItemHovered() && found != settings.stored.inferred.end()) {
+                ImGui::SetTooltip("Inferred by %s%s%s", found->second.by.generic_string().c_str(),
+                        found->second.usage.empty() ? "" : " as ", found->second.usage.c_str());
+            }
+            break;
+        }
+        case arti::asset::SettingLayer::Default:
+            ImGui::TextDisabled("default");
+            break;
+        }
+
+        if (authored) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset")) {
+                // 清除用户设定，回落到 inferred / default。
+                pipeline.setAuthoredSetting(m_selected_source, descriptor.key, std::nullopt);
+            }
+        }
+        if (!descriptor.doc.empty() && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", descriptor.doc.c_str());
+        }
+        ImGui::PopID();
+    }
+
+    for (const auto& issue: settings.resolved.issues()) {
+        ImGui::TextColored(kStaleColor, "%s: %s", issue.key.c_str(), issue.detail.c_str());
+    }
+}
+
+void ContentBrowserPanel::drawEngineAssets() {
+    const auto engine_assets = m_project->assetPipeline().engineAssets();
+    if (engine_assets.empty()) {
+        return;
+    }
+
+    ImGui::Separator();
+    if (!ImGui::CollapsingHeader("Engine Assets", ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+    ImGui::TextDisabled("Built into the engine. No source file, read only.");
+
+    if (!ImGui::BeginTable("##ContentBrowserEngine", 3,
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable)) {
+        return;
+    }
+    ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.0f);
+    ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+    ImGui::TableSetupColumn("UUID", ImGuiTableColumnFlags_WidthFixed, 170.0f);
+    ImGui::TableHeadersRow();
+
+    for (const auto& entry: engine_assets) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::PushID(static_cast<int>(entry.metadata.handle.value()));
+        ImGui::TextUnformatted(entry.metadata.source_path.generic_string().c_str());
+        ImGui::SameLine();
+        drawAssetRow(entry.metadata, false);
+        ImGui::PopID();
+    }
+    ImGui::EndTable();
 }
 
 } // namespace arti::editor

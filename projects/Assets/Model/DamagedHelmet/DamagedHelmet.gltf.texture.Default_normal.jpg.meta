@@ -1,9 +1,0 @@
-Asset:
-  Handle: dd66dd0423394e59
-  Type: artiengine.asset.texture
-  SourcePath: Model/DamagedHelmet/DamagedHelmet.gltf.texture.Default_normal.jpg
-  ArtifactPath: Imported/dd66dd0423394e59.artitexture
-  Properties:
-    {}
-  Dependencies:
-    []
