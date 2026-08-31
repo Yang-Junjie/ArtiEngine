@@ -10,29 +10,21 @@ namespace {
 
 constexpr const char* materialTypeName(rendering::MaterialType type) {
     switch (type) {
-        case rendering::MaterialType::Unlit:
-            return "Unlit";
-        case rendering::MaterialType::BlinnPhong:
-            return "BlinnPhong";
         case rendering::MaterialType::PBR:
             return "PBR";
         case rendering::MaterialType::UserType:
             return "UserType";
     }
-    return "BlinnPhong";
+    return "PBR";
 }
 
+// 认不出来的名字一律当 PBR。以前写下的 "Unlit" / "BlinnPhong" 会走到这一条 —— 那两个着色
+// 模型已经整个移除，旧产物里连带的 SpecularColor / Shininess 也不再被读。
 rendering::MaterialType materialTypeFromName(const std::string& name) {
-    if (name == "Unlit") {
-        return rendering::MaterialType::Unlit;
-    }
-    if (name == "PBR") {
-        return rendering::MaterialType::PBR;
-    }
     if (name == "UserType") {
         return rendering::MaterialType::UserType;
     }
-    return rendering::MaterialType::BlinnPhong;
+    return rendering::MaterialType::PBR;
 }
 
 }
@@ -44,10 +36,6 @@ std::vector<std::byte> encodeMaterialArtifact(const MaterialAsset::Params& param
     node["Type"] = materialTypeName(params.type);
     node["BaseColor"] = std::vector{ params.base_color.r, params.base_color.g, params.base_color.b,
         params.base_color.a };
-    node["SpecularColor"] = std::vector{ params.specular_color.r, params.specular_color.g,
-        params.specular_color.b };
-    node["SpecularStrength"] = params.specular_strength;
-    node["Shininess"] = params.shininess;
     node["Metallic"] = params.metallic_strength;
     node["Roughness"] = params.roughness_strength;
     node["Occlusion"] = params.occlusion_strength;
@@ -90,16 +78,6 @@ std::shared_ptr<arti::asset::Asset> MaterialLoader::decode(
     if (const auto base_color = node["BaseColor"]; base_color && base_color.size() == 4) {
         params.base_color = { base_color[0].as<float>(), base_color[1].as<float>(),
             base_color[2].as<float>(), base_color[3].as<float>() };
-    }
-    if (const auto specular = node["SpecularColor"]; specular && specular.size() == 3) {
-        params.specular_color = { specular[0].as<float>(), specular[1].as<float>(),
-            specular[2].as<float>() };
-    }
-    if (node["SpecularStrength"]) {
-        params.specular_strength = node["SpecularStrength"].as<float>();
-    }
-    if (node["Shininess"]) {
-        params.shininess = node["Shininess"].as<float>();
     }
     if (node["Metallic"]) {
         params.metallic_strength = node["Metallic"].as<float>();

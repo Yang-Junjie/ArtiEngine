@@ -161,15 +161,31 @@ bool writeBinary(const std::filesystem::path& path, const std::vector<unsigned c
     return output.good();
 }
 
-constexpr std::string_view kTriangle = "o Triangle\n"
-                                       "v 0 0 0\n"
-                                       "v 1 0 0\n"
-                                       "v 0 1 0\n"
-                                       "vt 0 0\n"
-                                       "vt 1 0\n"
-                                       "vt 0 1\n"
-                                       "vn 0 0 1\n"
-                                       "f 1/1/1 2/2/1 3/3/1\n";
+// 不引用任何外部资源的最小 glTF：只有一个三角形网格，没有 image / texture / material。
+// 「独立源文件」那些用例（导入计数、一源一 sidecar、孤儿回收、Library 整个重建）要的就是它
+// —— 多一个被引用的源文件，那一整段的计数断言就都得跟着改。
+std::string standaloneGltf() {
+    std::string text = R"({
+  "asset": { "version": "2.0" },
+  "buffers": [ { "byteLength": 42, "uri": "data:application/octet-stream;base64,__DATA__" } ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 36 },
+    { "buffer": 0, "byteOffset": 36, "byteLength": 6 }
+  ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+      "min": [0,0,0], "max": [1,1,0] },
+    { "bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR" }
+  ],
+  "meshes": [ { "name": "Triangle", "primitives": [
+    { "attributes": { "POSITION": 0 }, "indices": 1 } ] } ],
+  "nodes": [ { "mesh": 0 } ],
+  "scenes": [ { "nodes": [ 0 ] } ],
+  "scene": 0
+})";
+    text.replace(text.find("__DATA__"), 8, base64(triangleBuffer()));
+    return text;
+}
 
 int run() {
     TemporaryDirectory temporary{ std::filesystem::temp_directory_path() /
@@ -194,24 +210,25 @@ int run() {
                     "builtin assets wrote .meta sidecars into Assets/")) {
         return 1;
     }
-    if (!require(pipeline.canImport("triangle.OBJ"),
-                "OBJ extension matching is not case-insensitive") ||
+    if (!require(pipeline.canImport("triangle.GLTF"),
+                "glTF extension matching is not case-insensitive") ||
             !require(!pipeline.canImport("notes.txt"), "unsupported extension was accepted")) {
         return 1;
     }
 
-    if (!require(writeText(assets / "triangle.obj", kTriangle), "failed to write OBJ fixture") ||
+    if (!require(writeText(assets / "triangle.gltf", standaloneGltf()),
+                "failed to write the glTF fixture") ||
             !require(writeText(assets / "notes.txt", "unsupported\n"),
                     "failed to write unsupported fixture")) {
         return 1;
     }
 
-    // Step 2: 首轮 reconcile 应该导入 OBJ、把 txt 记成 unsupported。
+    // Step 2: 首轮 reconcile 应该导入 glTF、把 txt 记成 unsupported。
     {
         const auto plan = pipeline.planReconcile();
         if (!require(plan.complete(), "the first plan did not complete") ||
                 !require(plan.countWithAction(arti::asset::ReconcileAction::Import) == 1,
-                        "the plan did not schedule the OBJ for import") ||
+                        "the plan did not schedule the glTF for import") ||
                 !require(plan.countWithAction(arti::asset::ReconcileAction::Unsupported) == 1,
                         "the plan did not mark the txt as unsupported") ||
                 !require(plan.orphans.empty() && plan.conflicts.empty() &&
@@ -223,17 +240,17 @@ int run() {
 
     const auto first = pipeline.reconcile();
     if (!require(first.succeeded(), "the first reconcile failed") ||
-            !require(first.imported == 1, "the first reconcile did not import the OBJ") ||
+            !require(first.imported == 1, "the first reconcile did not import the glTF") ||
             !require(first.unsupported == 1, "the first reconcile miscounted unsupported files")) {
         return 1;
     }
 
-    const auto triangle = pipeline.sourceAssets("triangle.obj");
+    const auto triangle = pipeline.sourceAssets("triangle.gltf");
     if (!require(triangle.state == arti::tools::asset::SourceState::Imported,
-                "the imported OBJ is not in the Imported state") ||
+                "the imported glTF is not in the Imported state") ||
             !require(triangle.assets.size() > 1,
-                    "the OBJ did not produce sub-assets (mesh + prefab)") ||
-            !require(pipeline.isImported("triangle.obj"), "imported source was not indexed")) {
+                    "the glTF did not produce sub-assets (mesh + prefab)") ||
+            !require(pipeline.isImported("triangle.gltf"), "imported source was not indexed")) {
         return 1;
     }
 
@@ -242,7 +259,7 @@ int run() {
                 "one source file must produce exactly one .meta sidecar")) {
         return 1;
     }
-    // local_id 用源文件里的名字（OBJ 的 "o Triangle"），不是下标。
+    // local_id 用源文件里的名字（glTF mesh 的 "Triangle"），不是下标。
     bool named_mesh = false;
     for (const auto& asset: triangle.assets) {
         if (asset.local_id == "mesh.Triangle") {
@@ -253,7 +270,7 @@ int run() {
             return 1;
         }
     }
-    if (!require(named_mesh, "the mesh local_id did not use the OBJ object name")) {
+    if (!require(named_mesh, "the mesh local_id did not use the glTF mesh name")) {
         return 1;
     }
     if (!require(pipeline.sourceAssets("notes.txt").state ==
@@ -271,7 +288,7 @@ int run() {
         const auto plan = pipeline.planReconcile();
         if (!require(!plan.hasWork(), "a second plan still reported work to do") ||
                 !require(plan.countWithAction(arti::asset::ReconcileAction::Current) == 1,
-                        "the second plan did not report the OBJ as current")) {
+                        "the second plan did not report the glTF as current")) {
             return 1;
         }
         const auto report = pipeline.reconcile();
@@ -312,7 +329,7 @@ int run() {
                     "builtin assets were not registered after reopen") ||
             !require(pipeline.checkIntegrity().succeeded(),
                     "builtin artifacts were not regenerated after being deleted") ||
-            !require(pipeline.isImported("triangle.obj"),
+            !require(pipeline.isImported("triangle.gltf"),
                     "persisted metadata was not restored after reopen")) {
         return 1;
     }
@@ -320,9 +337,9 @@ int run() {
     // 孤儿回收：删掉源文件，.meta 和 artifact 都该被清掉。
     const size_t metadata_before = countMetadataFiles(assets);
     const size_t artifacts_before = countFiles(artifacts);
-    const size_t asset_count = pipeline.sourceAssets("triangle.obj").assets.size();
-    std::filesystem::remove(assets / "triangle.obj", error);
-    if (!require(!error, "failed to delete the OBJ source")) {
+    const size_t asset_count = pipeline.sourceAssets("triangle.gltf").assets.size();
+    std::filesystem::remove(assets / "triangle.gltf", error);
+    if (!require(!error, "failed to delete the glTF source")) {
         return 1;
     }
     {
@@ -339,7 +356,7 @@ int run() {
                         "orphaned .meta files were not removed") ||
                 !require(countFiles(artifacts) < artifacts_before,
                         "orphaned artifacts were not removed") ||
-                !require(!pipeline.isImported("triangle.obj"),
+                !require(!pipeline.isImported("triangle.gltf"),
                         "the forgotten source is still reported as imported")) {
             return 1;
         }
@@ -560,72 +577,6 @@ int run() {
         }
     }
 
-    // OBJ 走同一条路：mtl 里的 map_Bump 推断出 linear，且不再自己解码贴图。
-    std::filesystem::create_directories(assets / "Obj", error);
-    if (!require(!error, "failed to create the obj fixture directory") ||
-            !require(writeBinary(assets / "Obj" / "rock.tga", onePixelImage()),
-                    "failed to write the obj texture fixture") ||
-            !require(writeText(assets / "Obj" / "rock.mtl",
-                            "newmtl stone\nmap_Bump rock.tga\n"),
-                    "failed to write the mtl fixture") ||
-            !require(writeText(assets / "Obj" / "rock.obj",
-                            std::string{ "mtllib rock.mtl\nusemtl stone\n" } +
-                                    std::string{ kTriangle }),
-                    "failed to write the obj fixture")) {
-        return 1;
-    }
-    {
-        const auto plan = pipeline.planReconcile();
-        const auto tga = std::ranges::find_if(plan.items, [](const auto& item) {
-            return item.source_path.generic_string() == "Obj/rock.tga";
-        });
-        if (!require(tga != plan.items.end(), "the obj texture is missing from the plan")) {
-            return 1;
-        }
-        const auto inferred = tga->inferred.find("Colorspace");
-        if (!require(inferred != tga->inferred.end(),
-                    "the obj did not publish a Colorspace inference") ||
-                !require(std::get<std::string>(inferred->second.value) == "linear",
-                        "an mtl bump slot must infer linear") ||
-                !require(inferred->second.usage == "normal",
-                        "the mtl inference must record its slot")) {
-            return 1;
-        }
-
-        size_t tga_at = plan.items.size();
-        size_t obj_at = plan.items.size();
-        for (size_t index = 0; index < plan.items.size(); ++index) {
-            const auto path = plan.items[index].source_path.generic_string();
-            if (path == "Obj/rock.tga") {
-                tga_at = index;
-            } else if (path == "Obj/rock.obj") {
-                obj_at = index;
-            }
-        }
-        if (!require(tga_at < obj_at,
-                    "the mtl texture must be ordered before the obj that uses it")) {
-            return 1;
-        }
-    }
-    if (!require(pipeline.reconcile().succeeded(), "the obj reconcile failed")) {
-        return 1;
-    }
-    {
-        const auto obj = pipeline.sourceAssets("Obj/rock.obj");
-        for (const auto& asset: obj.assets) {
-            if (!require(asset.type != arti::engine::asset::kTextureAssetType,
-                        "the obj must reference the standalone texture instead of "
-                        "decoding its own copy")) {
-                return 1;
-            }
-        }
-        const auto settings = pipeline.sourceSettings("Obj/rock.tga");
-        if (!require(settings.resolved.getString("Colorspace") == "linear",
-                    "the mtl inference did not reach the texture importer")) {
-            return 1;
-        }
-    }
-
     // 推断冲突：第二个 glTF 把同一张图当 baseColor 用（→ srgb）。
     // 一个源文件只有一份设置，所以只能有一个胜出，并且必须被报告。
     if (!require(writeText(assets / "Model" / "armor.gltf",
@@ -806,7 +757,7 @@ int run() {
     }
 
     // 坏 .meta 不该让项目打不开。
-    if (!require(writeText(assets / "broken.obj.meta", "not: valid: metadata: at: all\n"),
+    if (!require(writeText(assets / "broken.gltf.meta", "not: valid: metadata: at: all\n"),
                 "failed to write the broken metadata fixture")) {
         return 1;
     }

@@ -1,25 +1,5 @@
 Entities:
   - EntityComponents:
-      arti.id: 298fc63b588bf007
-      arti.parent: ~
-      arti.tag: mitsuba-sphere
-      arti.transform:
-        Translation: [-5.272369, 0, 0]
-        Rotation: [1, 0, 0, 0]
-        Scale: [1, 1, 1]
-  - EntityComponents:
-      arti.id: 2c348b05abec25d7
-      arti.parent: 298fc63b588bf007
-      arti.tag: Mesh 0
-      arti.transform:
-        Translation: [0, 0, 0]
-        Rotation: [1, 0, 0, 0]
-        Scale: [1, 1, 1]
-      artiengine.mesh_renderer:
-        Mesh: d917524cbb54ed36
-        Materials: [4ec2a786448e1dfc]
-        Visible: true
-  - EntityComponents:
       arti.id: 4673682bd198f4b7
       arti.parent: ~
       arti.tag: Environment
@@ -77,18 +57,6 @@ Entities:
       artiengine.mesh_renderer:
         Mesh: b0117e1000000001
         Materials: [b0117e1000000002]
-        Visible: true
-  - EntityComponents:
-      arti.id: cd4f06f380969949
-      arti.parent: 298fc63b588bf007
-      arti.tag: Mesh 1
-      arti.transform:
-        Translation: [0, 0, 0]
-        Rotation: [1, 0, 0, 0]
-        Scale: [1, 1, 1]
-      artiengine.mesh_renderer:
-        Mesh: f68a2ff1f11c94d8
-        Materials: [7257446284fc76f0]
         Visible: true
   - EntityComponents:
       arti.id: d36ea6a93c3916e9

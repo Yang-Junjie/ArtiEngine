@@ -5,10 +5,8 @@ add_library(artiengine STATIC
     asset/detail/texture_artifact.cpp
     asset/gpu_asset_cache.cpp
     asset/importers/detail/gltf_parser.cpp
-    asset/importers/detail/mtl_scan.cpp
     asset/importers/gltf_importer.cpp
     asset/importers/material_importer.cpp
-    asset/importers/obj_importer.cpp
     asset/importers/texture_importer.cpp
     asset/loaders/material_loader.cpp
     asset/loaders/mesh_loader.cpp
@@ -40,8 +38,7 @@ target_link_libraries(artiengine
         ArtiChoco::Asset
         ArtiSDK::GLM
     PRIVATE
-        # OBJ / glTF 解析和图片解码只在 importer 的 .cpp 里用，不出现在公开头。
-        TinyObjLoader::TinyObjLoader
+        # glTF 解析和图片解码只在 importer 的 .cpp 里用，不出现在公开头。
         CGltf::CGltf
         stb::stb
 )

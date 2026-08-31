@@ -6,7 +6,6 @@
 #include <string_view>
 #include <vector>
 
-#include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
 namespace arti::engine::asset {
@@ -18,11 +17,8 @@ class TextureAsset;
 class MaterialAsset final : public arti::asset::Asset {
 public:
     struct Params {
-        rendering::MaterialType type{ rendering::MaterialType::BlinnPhong };
+        rendering::MaterialType type{ rendering::MaterialType::PBR };
         glm::vec4 base_color{ 1.0f, 1.0f, 1.0f, 1.0f };
-        glm::vec3 specular_color{ 1.0f, 1.0f, 1.0f };
-        float specular_strength{ 0.5f };
-        float shininess{ 32.0f };
         float metallic_strength{ 0.0f };
         float roughness_strength{ 1.0f };
         float occlusion_strength{ 1.0f };

@@ -19,27 +19,11 @@ target_link_libraries(imguizmo PUBLIC ImGui::Core)
 
 set_target_properties(imguizmo PROPERTIES FOLDER "ThirdParty")
 
-# tiny_obj_loader：单头文件的 OBJ + MTL 解析器。
-# 它同时暴露经典 MTL 字段（Kd/Ks/Ns）和 PBR 扩展（map_Pr/map_Pm/norm），
-# 所以 importer 能按哪套有值来定 MaterialType，不用猜着映射。
-#
-# 实现要在**一个**翻译单元里定义 TINYOBJLOADER_IMPLEMENTATION，所以给个 .cpp 而不是纯接口库。
-add_library(tinyobjloader STATIC
-    tiny_obj_loader/tiny_obj_loader.cpp
-)
-add_library(TinyObjLoader::TinyObjLoader ALIAS tinyobjloader)
-
-target_compile_features(tinyobjloader PUBLIC cxx_std_20)
-target_include_directories(tinyobjloader SYSTEM PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/tiny_obj_loader"
-)
-set_target_properties(tinyobjloader PROPERTIES FOLDER "ThirdParty")
-
 # cgltf：单头文件的 glTF 2.0 解析器。选它而不是 tinygltf 是因为零额外依赖
 # （tinygltf 要拉 nlohmann/json 进来），而且 accessor 读取有现成的 helper ——
 # componentType × normalized 的那堆组合不用自己拆。
 #
-# 和 tiny_obj_loader 一样，实现宏只能在**一个**翻译单元里定义，所以给个 .cpp。
+# 实现宏只能在**一个**翻译单元里定义，所以给个 .cpp 而不是纯接口库。
 add_library(cgltf STATIC
     cgltf/cgltf.cpp
 )

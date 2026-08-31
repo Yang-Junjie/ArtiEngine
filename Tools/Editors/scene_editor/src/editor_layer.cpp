@@ -40,7 +40,7 @@
 namespace arti::editor {
 namespace {
 
-// 子资产的 source_path 是「源文件 + 后缀链」（box.obj.mesh.0），实体名只要最前面的源文件名。
+// 子资产的 source_path 是「源文件 + 后缀链」（box.gltf.mesh.0），实体名只要最前面的源文件名。
 std::string sourceStemName(const std::filesystem::path& source_path) {
     std::string name = source_path.filename().string();
     if (const auto dot = name.find('.'); dot != std::string::npos) {

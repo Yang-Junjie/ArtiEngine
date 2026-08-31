@@ -3,7 +3,6 @@
 #include "asset/builtin_assets.h"
 #include "asset/importers/gltf_importer.h"
 #include "asset/importers/material_importer.h"
-#include "asset/importers/obj_importer.h"
 #include "asset/importers/texture_importer.h"
 #include "asset/loaders/material_loader.h"
 #include "asset/loaders/mesh_loader.h"
@@ -45,7 +44,6 @@ bool AssetPipeline::open(const std::filesystem::path& assets_root,
             m_manager->registerLoader(std::make_unique<engine::asset::TextureLoader>()) &&
             m_manager->registerLoader(std::make_unique<engine::asset::PrefabLoader>());
     const bool importers_registered =
-            m_manager->registerImporter(std::make_unique<engine::asset::ObjImporter>()) &&
             m_manager->registerImporter(std::make_unique<engine::asset::GltfImporter>()) &&
             m_manager->registerImporter(std::make_unique<engine::asset::TextureImporter>()) &&
             m_manager->registerImporter(std::make_unique<engine::asset::MaterialImporter>());
