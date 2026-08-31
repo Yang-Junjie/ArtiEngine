@@ -15,7 +15,7 @@ public:
     void draw();
 
 private:
-    void drawTagComponent(scene::Entity& entity);
+    void drawEntityInfo(scene::Entity& entity);
     void drawTransformComponent(scene::Entity& entity);
     void drawCameraComponent(scene::Entity& entity);
     void drawMeshRendererComponent(scene::Entity& entity);

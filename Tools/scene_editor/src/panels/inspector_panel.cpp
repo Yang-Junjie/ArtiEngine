@@ -94,7 +94,7 @@ void InspectorPanel::draw() {
         return;
     }
 
-    drawTagComponent(entity);
+    drawEntityInfo(entity);
     drawTransformComponent(entity);
     drawCameraComponent(entity);
     drawMeshRendererComponent(entity);
@@ -138,8 +138,9 @@ void InspectorPanel::draw() {
     ImGui::End();
 }
 
-void InspectorPanel::drawTagComponent(scene::Entity& entity) {
+void InspectorPanel::drawEntityInfo(scene::Entity& entity) {
     auto* tag = tryGet<scene::TagComponent>(entity);
+
     if (tag == nullptr) {
         return;
     }
@@ -151,6 +152,8 @@ void InspectorPanel::drawTagComponent(scene::Entity& entity) {
     if (ImGui::InputText("Name", buffer, sizeof(buffer))) {
         tag->tag = buffer;
     }
+
+    ImGui::Text("UUID: %s", uuidToText(entity.getUUID()).c_str());
 }
 
 void InspectorPanel::drawTransformComponent(scene::Entity& entity) {
