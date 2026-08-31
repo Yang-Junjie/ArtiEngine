@@ -1,5 +1,6 @@
 #include "imgui/imgui_host.h"
 
+#include "artichoco/core/application.h"
 #include "artichoco/core/window.h"
 #include "artichoco/platform/window/sdl_window.h"
 
@@ -9,10 +10,13 @@
 #include <cstddef>
 #include <span>
 #include <stdexcept>
+#include <system_error>
 #include <vector>
 
 namespace arti::engine {
 namespace {
+
+const core::Logger::Channel& log() { return core::Application::get().getLogChannel(); }
 
 platform::SDLWindow& requireSDLWindow(core::Window& window) {
     auto* sdl_window = dynamic_cast<platform::SDLWindow*>(&window);
@@ -63,6 +67,7 @@ ImGuiHost::ImGuiHost(core::Window& window, rendering::Renderer& renderer,
     }
 
     try {
+        loadFont(create_info);
         createFontTexture();
     } catch (...) {
         m_window.removeSDLEventObserver(m_event_observer_id);
@@ -71,6 +76,50 @@ ImGuiHost::ImGuiHost(core::Window& window, rendering::Renderer& renderer,
         m_context = nullptr;
         throw;
     }
+}
+
+void ImGuiHost::loadFont(const ImGuiHostCreateInfo& create_info) {
+    if (create_info.font_path.empty()) {
+        return;
+    }
+
+    ImGuiIO& io = ImGui::GetIO();
+    std::error_code error;
+    if (!std::filesystem::exists(create_info.font_path, error)) {
+        log().warn("UI font '{}' not found, falling back to the built-in font",
+                create_info.font_path.string());
+        return;
+    }
+
+    ImFontConfig config;
+    // 图集是**静态**的：这个后端没有声明 ImGuiBackendFlags_RendererHasTextures，所以 ImGui
+    // 走 1.92 之前那条路 —— 启动时把 glyph_ranges 指定的字形一次性烘完，运行期不再增长。
+    // 换句话说范围之外的字会显示成方框，而不是按需补烘。真要按需补烘得让 ImGuiPass 处理
+    // ImDrawData::Textures 的增删改，那是另一件事。
+    const ImWchar* ranges = nullptr;
+    if (create_info.chinese_glyphs) {
+        // ASCII + 拉丁扩展 + 半角 + 日文假名 + 2500 个简体常用汉字。
+        // 不用 GetGlyphRangesChineseFull()：那是 21000 个字形，图集会涨到几千像素见方、
+        // 启动要烘好几秒，而编辑器里能出现的中文基本都在常用字里。
+        //
+        // 返回的是 ImGui 内部的静态数组，所以生命周期没问题 —— 这个指针要一直活到图集烘完，
+        // 传一个局部数组进来是 ImFontConfig::GlyphRanges 最经典的坑。
+        ranges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
+        // 两千多个字形再横向 2 倍过采样，图集面积直接翻倍。CJK 字形本身笔画密，
+        // 过采样带来的清晰度提升远不如拉丁文明显，所以这里按 1 来。
+        config.OversampleH = 1;
+        config.OversampleV = 1;
+    }
+
+    if (io.Fonts->AddFontFromFileTTF(create_info.font_path.string().c_str(),
+                create_info.font_size_pixels, &config, ranges) == nullptr) {
+        log().warn("Failed to load the UI font '{}', falling back to the built-in font",
+                create_info.font_path.string());
+        return;
+    }
+    log().info("Loaded the UI font '{}' at {}px ({})", create_info.font_path.filename().string(),
+            create_info.font_size_pixels,
+            create_info.chinese_glyphs ? "with common simplified Chinese" : "Latin only");
 }
 
 void ImGuiHost::createFontTexture() {
@@ -97,6 +146,7 @@ void ImGuiHost::createFontTexture() {
     desc.generate_mipmaps = false;
     desc.debug_name = "ImGui font atlas";
     m_font_texture = m_renderer.createTexture(desc);
+    log().debug("ImGui font atlas is {}x{}", width, height);
 
     io.Fonts->SetTexID(rendering::imguiTextureId(m_font_texture));
 }
