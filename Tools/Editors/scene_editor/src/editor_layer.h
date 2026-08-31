@@ -48,6 +48,7 @@ private:
     void drawMenuBar();
     void drawToolbar();
     void updateEditorCamera(float deltaTime);
+    void submitSelectionGizmos();
 
     // 把 Content Browser 拖出来的资产在 Viewport 上放下来生成场景实体。
     void handleViewportAssetDrop(float rect_x, float rect_y, float rect_width, float rect_height);

@@ -28,6 +28,7 @@
 #include "artichoco/scene/entity.h"
 #include "artichoco/scene/scene.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -201,6 +202,12 @@ void EditorLayer::onRender() {
         }
     } else {
         submit = &empty;
+    }
+
+    // 调试线必须在 renderFrame **之前**提交：它们只作用于紧接着的那一帧，和 requestPick 一样。
+    // 放在 extract 之后是因为要用相机（编辑器相机的 override 也已经生效了）。
+    if (can_extract && !m_context->isPlaying()) {
+        submitSelectionGizmos();
     }
 
     const auto statistics = m_renderer->renderFrame(*submit,
@@ -433,6 +440,79 @@ void EditorLayer::spawnAssetEntity(core::UUID asset) {
 
     log.warn("Asset {} is of type '{}' and cannot be spawned directly",
             metadata->source_path.string(), metadata->type);
+}
+
+// 选中实体的调试轮廓。规则只有一条：选中的实体，按它挂了什么组件画对应的线。
+//
+// 只在编辑模式画，不在 Play 模式画 —— Play 是「看成品」，选择框会碍事。
+void EditorLayer::submitSelectionGizmos() {
+    // 颜色都是显示线性的，写进去就是看到的颜色（见 rendering::DebugLine）。
+    constexpr glm::vec4 kBoundsColor{ 1.0f, 0.6f, 0.1f, 1.0f };
+    constexpr glm::vec4 kLightColor{ 1.0f, 0.9f, 0.3f, 1.0f };
+
+    const auto& selected = m_context->selectedEntity();
+    if (!selected) {
+        return;
+    }
+    auto entity = m_context->scene().findEntity(*selected);
+    if (!entity.isValid()) {
+        return;
+    }
+    if (!entity.hasComponent<scene::WorldTransformComponent>()) {
+        return;
+    }
+    // WorldTransformComponent 是场景自己维护的，只有 const 访问 —— 这里也只读。
+    const glm::mat4& world = entity.getComponent<scene::WorldTransformComponent>().world;
+    const glm::vec3 position{ world[3] };
+
+    // 网格：局部包围盒变换到世界。局部盒子从 Renderer 查 —— 顶点数据上传完就不在 CPU 侧了。
+    if (entity.hasComponent<engine::MeshRendererComponent>()) {
+        const auto& mesh_renderer = entity.getComponent<engine::MeshRendererComponent>();
+        const auto handle = m_project->gpuAssets().meshHandle(mesh_renderer.mesh.id());
+        if (const auto info = m_renderer->meshInfo(handle)) {
+            m_renderer->drawAABB(info->bounds.transformed(world), kBoundsColor);
+        }
+    }
+
+    // 点光源：range 就是那个线框球的半径。没有它的话点光源在视口里完全看不见。
+    if (entity.hasComponent<engine::PointLightComponent>()) {
+        const auto& light = entity.getComponent<engine::PointLightComponent>();
+        m_renderer->drawWireSphere(position, light.range, kLightColor);
+    }
+
+    // 聚光灯：四条母线 + 远端一个环，够看出朝向和张角。
+    if (entity.hasComponent<engine::SpotLightComponent>()) {
+        const auto& light = entity.getComponent<engine::SpotLightComponent>();
+        const glm::vec3 forward = glm::normalize(glm::vec3{ -world[2] });
+        const glm::vec3 right = glm::normalize(glm::vec3{ world[0] });
+        const glm::vec3 up = glm::normalize(glm::vec3{ world[1] });
+        const glm::vec3 end = position + forward * light.range;
+        const float outer = glm::radians(light.outer_cone_degrees);
+        const float ring_radius = std::tan(outer) * light.range;
+
+        constexpr uint32_t kRingSegments = 24;
+        constexpr float kTwoPi = 6.28318530718f;
+        glm::vec3 previous{};
+        for (uint32_t index = 0; index <= kRingSegments; ++index) {
+            const float angle = static_cast<float>(index) * kTwoPi / kRingSegments;
+            const glm::vec3 point =
+                    end + (right * std::cos(angle) + up * std::sin(angle)) * ring_radius;
+            if (index > 0) {
+                m_renderer->drawLine(previous, point, kLightColor);
+            }
+            // 四条母线，每隔四分之一圈拉一条。
+            if (index % (kRingSegments / 4) == 0 && index < kRingSegments) {
+                m_renderer->drawLine(position, point, kLightColor);
+            }
+            previous = point;
+        }
+    }
+
+    // 方向光没有位置也没有范围，只画一条朝向线 —— 至少能看出它转到哪儿了。
+    if (entity.hasComponent<engine::DirectionalLightComponent>()) {
+        const glm::vec3 forward = glm::normalize(glm::vec3{ -world[2] });
+        m_renderer->drawLine(position, position + forward * 2.0f, kLightColor);
+    }
 }
 
 void EditorLayer::updateEditorCamera(float deltaTime) {
