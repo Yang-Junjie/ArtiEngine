@@ -1,5 +1,17 @@
 Entities:
   - EntityComponents:
+      arti.id: 0973c7af019aa2df
+      arti.parent: ~
+      arti.tag: Sphere
+      arti.transform:
+        Translation: [-0.109293684, 0, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000003
+        Materials: [b0117e1000000002]
+        Visible: true
+  - EntityComponents:
       arti.id: 1147f1a44d53588e
       arti.parent: ~
       arti.tag: Entity
@@ -86,18 +98,6 @@ Entities:
         Intensity: 25
         Range: 10
         Enabled: true
-  - EntityComponents:
-      arti.id: d36ea6a93c3916e9
-      arti.parent: ~
-      arti.tag: Cube
-      arti.transform:
-        Translation: [0, 0, 0]
-        Rotation: [1, 0, 0, 0]
-        Scale: [1, 1, 1]
-      artiengine.mesh_renderer:
-        Mesh: b0117e1000000001
-        Materials: [b0117e1000000002]
-        Visible: true
   - EntityComponents:
       arti.id: d4da1dd993484c98
       arti.parent: ~

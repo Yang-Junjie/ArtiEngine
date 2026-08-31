@@ -30,6 +30,13 @@ Component* tryGet(scene::Entity& entity) {
 
 constexpr std::size_t kUuidTextLength = 16;
 
+// 极窄窗口下向量行内单根轴的拖动框最小宽度，防止宽度算出负数/挤成一团。
+constexpr float kMinAxisWidth = 30.0f;
+
+constexpr ImVec4 kAxisXColor{ 0.85f, 0.35f, 0.35f, 1.0f };
+constexpr ImVec4 kAxisYColor{ 0.40f, 0.75f, 0.40f, 1.0f };
+constexpr ImVec4 kAxisZColor{ 0.40f, 0.55f, 0.90f, 1.0f };
+
 struct MeshRendererEditorState {
     std::string mesh_text;
     core::UUID mesh_applied{};
@@ -72,6 +79,194 @@ bool drawUuidInput(const char* label, std::string& text, core::UUID& applied) {
     return parseUuidText(text, applied);
 }
 
+// ---- 属性网格（两列：固定宽标签列 + 拉伸值列，交替行底色） ----
+
+void beginPropertyGrid() {
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2{ 6.0f, 3.5f });
+    ImGui::PushStyleColor(ImGuiCol_TableRowBg, ImVec4{ 0.0f, 0.0f, 0.0f, 0.05f });
+    ImGui::PushStyleColor(ImGuiCol_TableRowBgAlt, ImVec4{ 1.0f, 1.0f, 1.0f, 0.02f });
+    ImGui::BeginTable("##property_grid", 2,
+            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingFixedFit);
+    ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+    ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
+}
+
+void endPropertyGrid() {
+    ImGui::EndTable();
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar();
+}
+
+void propertyRow(const char* label, const char* tooltip = nullptr) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    if (tooltip != nullptr) {
+        ImGui::SetItemTooltip("%s", tooltip);
+    }
+    ImGui::TableSetColumnIndex(1);
+}
+
+void drawBoolRow(const char* label, bool* value, const char* tooltip = nullptr) {
+    propertyRow(label, tooltip);
+    ImGui::Checkbox("##value", value);
+}
+
+void drawFloatRow(const char* label, float* value, float speed, float min, float max,
+        const char* format = "%.3f", const char* tooltip = nullptr) {
+    propertyRow(label, tooltip);
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    ImGui::DragFloat("##value", value, speed, min, max, format);
+}
+
+void drawColorRow(const char* label, glm::vec3& color, const char* tooltip = nullptr) {
+    propertyRow(label, tooltip);
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    ImGui::ColorEdit3("##color", glm::value_ptr(color),
+            ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_InputRGB |
+            ImGuiColorEditFlags_NoDragDrop | ImGuiColorEditFlags_NoTooltip);
+}
+
+// Unity 风格向量控件：彩色 X/Y/Z 轴字母 + 拖动框，右键标签弹 Reset。
+void drawVec3Control(const char* label, glm::vec3& value, const glm::vec3& reset_value,
+        float speed, const char* format = "%.3f") {
+    propertyRow(label);
+
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float chip_width = ImGui::CalcTextSize("X").x;
+
+    const char* axes[] = { "X", "Y", "Z" };
+    const ImVec4* axis_colors[] = { &kAxisXColor, &kAxisYColor, &kAxisZColor };
+    float* components[] = { &value.x, &value.y, &value.z };
+
+    // 行内 ID 必须带上 label，否则 Translation/Rotation/Scale 三行的轴控件 ID 全撞车，
+    // 拖动状态和右键 Reset 会互相污染。
+    ImGui::PushID(label);
+
+    // 行内布局 = 3 根轴 + 2 个轴间距；每根轴内部 = 字母 + 间距 + 拖动框。
+    // 注意实际间距有 5 个（轴内 3 个 + 轴间 2 个），只按 3 个算会把 Z 挤出右缘。
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const float axis_total = (avail - 2.0f * spacing) / 3.0f;
+    const float drag_width = std::max(axis_total - chip_width - spacing, kMinAxisWidth);
+
+    // 以 Z 为基准从右往左锚定：Z 的右缘精确贴住列右缘，X/Y 依次向左排，
+    // 不会因逐项累计的浮点误差把最后一根裁掉。
+    const float row_y = ImGui::GetCursorScreenPos().y;
+    const float row_right = ImGui::GetCursorScreenPos().x + avail;
+    for (int i = 0; i < 3; ++i) {
+        const float x = row_right - static_cast<float>(3 - i) * axis_total -
+                        static_cast<float>(2 - i) * spacing;
+        ImGui::SetCursorScreenPos(ImVec2{ x, row_y });
+        ImGui::PushID(i);
+        ImGui::TextColored(*axis_colors[i], "%s", axes[i]);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(drag_width);
+        ImGui::DragFloat("##value", components[i], speed, 0.0f, 0.0f, format);
+        ImGui::PopID();
+    }
+    ImGui::PopID();
+
+    // 右键标签或拖动框 → Reset（id 绑定到标签，命中区域用最后一项的矩形）。
+    if (ImGui::BeginPopupContextItem(label)) {
+        if (ImGui::MenuItem("Reset")) {
+            value = reset_value;
+        }
+        ImGui::EndPopup();
+    }
+}
+
+// 整宽暗色按钮，用于 "+ Add Component" / "+ Add Material"。
+bool fullWidthDimButton(const char* label) {
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.16f, 0.16f, 0.17f, 0.60f });
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.92f, 0.45f, 0.11f, 0.22f });
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.92f, 0.45f, 0.11f, 0.40f });
+    const bool clicked = ImGui::Button(label, ImVec2{ -1.0f, 0.0f });
+    ImGui::PopStyleColor(3);
+    return clicked;
+}
+
+// ---- 组件头部（通用） ----
+// CollapsingHeader + 右键 Remove 菜单。
+// 返回 false 表示节已关闭或组件已被删除（调用方应跳过正文）。
+// Removable=false 时（如必需的 Transform）根本不实例化删除代码，编译期去掉。
+template<typename Component, bool Removable = true>
+bool drawComponentHeader(scene::Entity& entity, const char* label, bool default_open = true,
+        const char* tooltip = nullptr) {
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
+    if (default_open) {
+        flags |= ImGuiTreeNodeFlags_DefaultOpen;
+    }
+
+    // 悬停时给头部一点主题色底，暗示可交互。
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{ 0.92f, 0.45f, 0.11f, 0.12f });
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4{ 0.92f, 0.45f, 0.11f, 0.22f });
+    const bool open = ImGui::CollapsingHeader(label, flags);
+    ImGui::PopStyleColor(2);
+    const bool hovered = ImGui::IsItemHovered();
+
+    if (hovered && tooltip != nullptr) {
+        ImGui::SetTooltip("%s", tooltip);
+    }
+
+    bool remove_requested = false;
+    if constexpr (Removable) {
+        if (ImGui::BeginPopupContextItem(label)) {
+            if (ImGui::MenuItem("Remove Component")) {
+                remove_requested = true;
+            }
+            ImGui::EndPopup();
+        }
+
+        if (remove_requested) {
+            entity.removeComponent<Component>();
+            return false;
+        }
+    }
+    return open;
+}
+
+// Add Component 弹窗里的菜单项：已存在的置灰并提示。
+template<typename Component>
+void drawAddMenuItem(const char* label, scene::Entity& entity) {
+    const bool exists = entity.hasComponent<Component>();
+    ImGui::BeginDisabled(exists);
+    if (ImGui::MenuItem(label)) {
+        entity.addComponent<Component>();
+    }
+    if (exists) {
+        ImGui::SetItemTooltip("Already added to this entity");
+    }
+    ImGui::EndDisabled();
+}
+
+void drawAddComponentUI(scene::Entity& entity) {
+    if (fullWidthDimButton("+  Add Component")) {
+        ImGui::OpenPopup("AddComponentPopup");
+    }
+    if (ImGui::BeginPopup("AddComponentPopup")) {
+        ImGui::SeparatorText("Rendering");
+        drawAddMenuItem<engine::MeshRendererComponent>("Mesh Renderer", entity);
+        ImGui::SeparatorText("Lighting");
+        drawAddMenuItem<engine::DirectionalLightComponent>("Directional Light", entity);
+        drawAddMenuItem<engine::PointLightComponent>("Point Light", entity);
+        drawAddMenuItem<engine::SpotLightComponent>("Spot Light", entity);
+        ImGui::SeparatorText("Camera");
+        drawAddMenuItem<engine::CameraComponent>("Camera", entity);
+        ImGui::SeparatorText("Environment");
+        drawAddMenuItem<engine::EnvironmentComponent>("Environment", entity);
+        ImGui::EndPopup();
+    }
+}
+
+void drawEmptyState(const char* message) {
+    const ImVec2 window_size = ImGui::GetWindowSize();
+    const ImVec2 text_size = ImGui::CalcTextSize(message);
+    ImGui::SetCursorPos(ImVec2{ (window_size.x - text_size.x) * 0.5f,
+        (window_size.y - text_size.y) * 0.5f });
+    ImGui::TextDisabled("%s", message);
+}
+
 } // namespace
 
 InspectorPanel::InspectorPanel(EditorContext& context)
@@ -82,19 +277,25 @@ void InspectorPanel::draw() {
 
     const auto& selected_entity = m_context.selectedEntity();
     if (!selected_entity) {
-        ImGui::TextDisabled("No entity selected");
+        drawEmptyState("No entity selected");
         ImGui::End();
         return;
     }
 
     auto entity = m_context.scene().findEntity(*selected_entity);
     if (!entity.isValid()) {
-        ImGui::TextDisabled("Invalid entity");
+        drawEmptyState("Invalid entity");
         ImGui::End();
         return;
     }
 
     drawEntityInfo(entity);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    drawAddComponentUI(entity);
+    ImGui::Separator();
+
     drawTransformComponent(entity);
     drawCameraComponent(entity);
     drawMeshRendererComponent(entity);
@@ -103,44 +304,11 @@ void InspectorPanel::draw() {
     drawSpotLightComponent(entity);
     drawEnvironmentComponent(entity);
 
-    ImGui::Separator();
-    if (ImGui::Button("Add Component")) {
-        ImGui::OpenPopup("AddComponentPopup");
-    }
-    if (ImGui::BeginPopup("AddComponentPopup")) {
-        if (ImGui::MenuItem("Camera", nullptr, false,
-                    !entity.hasComponent<engine::CameraComponent>())) {
-            entity.addComponent<engine::CameraComponent>();
-        }
-        if (ImGui::MenuItem("Mesh Renderer", nullptr, false,
-                    !entity.hasComponent<engine::MeshRendererComponent>())) {
-            entity.addComponent<engine::MeshRendererComponent>();
-        }
-        if (ImGui::MenuItem("Directional Light", nullptr, false,
-                    !entity.hasComponent<engine::DirectionalLightComponent>())) {
-            entity.addComponent<engine::DirectionalLightComponent>();
-        }
-        if (ImGui::MenuItem("Point Light", nullptr, false,
-                    !entity.hasComponent<engine::PointLightComponent>())) {
-            entity.addComponent<engine::PointLightComponent>();
-        }
-        if (ImGui::MenuItem("Spot Light", nullptr, false,
-                    !entity.hasComponent<engine::SpotLightComponent>())) {
-            entity.addComponent<engine::SpotLightComponent>();
-        }
-        if (ImGui::MenuItem("Environment", nullptr, false,
-                    !entity.hasComponent<engine::EnvironmentComponent>())) {
-            entity.addComponent<engine::EnvironmentComponent>();
-        }
-        ImGui::EndPopup();
-    }
-
     ImGui::End();
 }
 
 void InspectorPanel::drawEntityInfo(scene::Entity& entity) {
     auto* tag = tryGet<scene::TagComponent>(entity);
-
     if (tag == nullptr) {
         return;
     }
@@ -149,11 +317,25 @@ void InspectorPanel::drawEntityInfo(scene::Entity& entity) {
     const auto length = std::min(tag->tag.size(), sizeof(buffer) - 1);
     std::memcpy(buffer, tag->tag.data(), length);
 
-    if (ImGui::InputText("Name", buffer, sizeof(buffer))) {
+    // 实体名：加高内边距，视觉上更像一个「对象头」而不是普通属性行。
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2{ 8.0f, 6.0f });
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    if (ImGui::InputText("##entity_name", buffer, sizeof(buffer))) {
         tag->tag = buffer;
     }
+    ImGui::PopStyleVar();
 
-    ImGui::Text("UUID: %s", uuidToText(entity.getUUID()).c_str());
+    // UUID：暗色整行可点，点击复制到剪贴板。
+    const std::string uuid_text = uuidToText(entity.getUUID());
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{ 0.55f, 0.55f, 0.58f, 1.0f });
+    ImGui::Selectable(uuid_text.c_str(), false);
+    ImGui::PopStyleColor();
+    if (ImGui::IsItemClicked()) {
+        ImGui::SetClipboardText(uuid_text.c_str());
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Click to copy the entity UUID");
+    }
 }
 
 void InspectorPanel::drawTransformComponent(scene::Entity& entity) {
@@ -162,18 +344,24 @@ void InspectorPanel::drawTransformComponent(scene::Entity& entity) {
         return;
     }
 
-    if (!ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // Transform 是必需的，不可删除，所以 Removable=false。
+    if (!drawComponentHeader<scene::TransformComponent, false>(entity, "Transform")) {
         return;
     }
 
-    ImGui::DragFloat3("Translation", glm::value_ptr(transform->translation), 0.1f);
+    beginPropertyGrid();
+    drawVec3Control("Translation", transform->translation, glm::vec3{ 0.0f }, 0.1f);
 
+    // 面板上显示角度（度），内部存四元数；只在值真的变了时才写回，避免每帧漂移。
     glm::vec3 euler_degrees = glm::degrees(glm::eulerAngles(transform->rotation));
-    if (ImGui::DragFloat3("Rotation", glm::value_ptr(euler_degrees), 1.0f)) {
+    const glm::vec3 previous_euler = euler_degrees;
+    drawVec3Control("Rotation", euler_degrees, glm::vec3{ 0.0f }, 0.5f, "%.1f");
+    if (euler_degrees != previous_euler) {
         transform->rotation = glm::quat{ glm::radians(euler_degrees) };
     }
 
-    ImGui::DragFloat3("Scale", glm::value_ptr(transform->scale), 0.1f);
+    drawVec3Control("Scale", transform->scale, glm::vec3{ 1.0f }, 0.01f);
+    endPropertyGrid();
 }
 
 void InspectorPanel::drawCameraComponent(scene::Entity& entity) {
@@ -182,63 +370,76 @@ void InspectorPanel::drawCameraComponent(scene::Entity& entity) {
         return;
     }
 
-    if (!ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (!drawComponentHeader<engine::CameraComponent>(entity, "Camera")) {
         return;
     }
 
-    ImGui::Checkbox("Primary", &camera->primary);
-    ImGui::DragFloat("FOV", &camera->fov_degrees, 1.0f, 1.0f, 179.0f, "%.1f deg");
-    ImGui::DragFloat("Near", &camera->near_plane, 0.01f, 0.001f, 10.0f);
-    ImGui::DragFloat("Far", &camera->far_plane, 1.0f, 1.0f, 10'000.0f);
-
-    if (ImGui::SmallButton("Remove##Camera")) {
-        entity.removeComponent<engine::CameraComponent>();
-    }
+    beginPropertyGrid();
+    drawBoolRow("Primary", &camera->primary,
+            "When multiple cameras exist, this one is used for rendering");
+    drawFloatRow("FOV", &camera->fov_degrees, 0.1f, 1.0f, 179.0f, "%.1f deg");
+    drawFloatRow("Near", &camera->near_plane, 0.01f, 0.001f, 10.0f);
+    drawFloatRow("Far", &camera->far_plane, 1.0f, 1.0f, 10'000.0f);
+    endPropertyGrid();
 }
 
 void InspectorPanel::drawMeshRendererComponent(scene::Entity& entity) {
-    if (!ImGui::CollapsingHeader("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
+    auto* mesh_renderer = tryGet<engine::MeshRendererComponent>(entity);
+    if (mesh_renderer == nullptr) {
         return;
     }
 
-    auto* mesh_renderer = tryGet<engine::MeshRendererComponent>(entity);
-    auto& state = meshRendererEditorStates()[entity.getUUID()];
+    if (!drawComponentHeader<engine::MeshRendererComponent>(entity, "Mesh Renderer")) {
+        return;
+    }
 
-    if (mesh_renderer != nullptr) {
-        if (mesh_renderer->mesh.id() != state.mesh_applied) {
-            state.mesh_text = uuidToText(mesh_renderer->mesh.id());
-            state.mesh_applied = mesh_renderer->mesh.id();
-        }
-        if (mesh_renderer->materials.size() != state.materials_applied.size()) {
-            state.material_texts.clear();
-            state.materials_applied.clear();
-            for (const auto& material : mesh_renderer->materials) {
-                state.material_texts.push_back(uuidToText(material.id()));
-                state.materials_applied.push_back(material.id());
-            }
+    // UUID 输入框的文本要跨帧保留（用户可能输到一半），所以按实体存一份。
+    auto& state = meshRendererEditorStates()[entity.getUUID()];
+    if (mesh_renderer->mesh.id() != state.mesh_applied) {
+        state.mesh_text = uuidToText(mesh_renderer->mesh.id());
+        state.mesh_applied = mesh_renderer->mesh.id();
+    }
+    if (mesh_renderer->materials.size() != state.materials_applied.size()) {
+        state.material_texts.clear();
+        state.materials_applied.clear();
+        for (const auto& material : mesh_renderer->materials) {
+            state.material_texts.push_back(uuidToText(material.id()));
+            state.materials_applied.push_back(material.id());
         }
     }
 
-    const bool mesh_valid = drawUuidInput("Mesh UUID", state.mesh_text, state.mesh_applied);
-    if (mesh_valid && mesh_renderer != nullptr) {
+    beginPropertyGrid();
+
+    propertyRow("Mesh");
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    const bool mesh_valid = drawUuidInput("##mesh_uuid", state.mesh_text, state.mesh_applied);
+    if (mesh_valid) {
         mesh_renderer->mesh =
                 arti::asset::AssetHandle<engine::asset::MeshAsset>{ state.mesh_applied };
     }
 
+    drawBoolRow("Visible", &mesh_renderer->visible);
+
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float remove_width =
+            ImGui::CalcTextSize("Remove").x + ImGui::GetStyle().FramePadding.x * 2.0f + spacing;
     for (size_t i = 0; i < state.material_texts.size(); ++i) {
+        propertyRow("Material");
         ImGui::PushID(static_cast<int>(i));
-        const bool material_valid = drawUuidInput("Material", state.material_texts[i],
-                state.materials_applied[i]);
-        if (material_valid && mesh_renderer != nullptr && i < mesh_renderer->materials.size()) {
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - remove_width);
+        const bool material_valid =
+                drawUuidInput("##material_uuid", state.material_texts[i], state.materials_applied[i]);
+        if (material_valid && i < mesh_renderer->materials.size()) {
             mesh_renderer->materials[i] =
                     arti::asset::AssetHandle<engine::asset::MaterialAsset>{ state.materials_applied[i] };
         }
         ImGui::SameLine();
-        if (ImGui::SmallButton("Remove")) {
-            state.material_texts.erase(state.material_texts.begin() + static_cast<std::ptrdiff_t>(i));
+        if (ImGui::Button("Remove")) {
+            state.material_texts.erase(
+                    state.material_texts.begin() + static_cast<std::ptrdiff_t>(i));
             state.materials_applied.erase(
                     state.materials_applied.begin() + static_cast<std::ptrdiff_t>(i));
-            if (mesh_renderer != nullptr && i < mesh_renderer->materials.size()) {
+            if (i < mesh_renderer->materials.size()) {
                 mesh_renderer->materials.erase(
                         mesh_renderer->materials.begin() + static_cast<std::ptrdiff_t>(i));
             }
@@ -246,35 +447,13 @@ void InspectorPanel::drawMeshRendererComponent(scene::Entity& entity) {
         }
         ImGui::PopID();
     }
-    if (ImGui::SmallButton("Add Material")) {
+
+    endPropertyGrid();
+
+    if (fullWidthDimButton("+  Add Material")) {
         state.material_texts.emplace_back(kUuidTextLength, '0');
         state.materials_applied.emplace_back(core::UUID{ 0 });
-        if (mesh_renderer != nullptr) {
-            mesh_renderer->materials.emplace_back();
-        }
-    }
-
-    if (mesh_renderer == nullptr) {
-        if (ImGui::SmallButton("Add Component##MeshRenderer")) {
-            engine::MeshRendererComponent component;
-            if (mesh_valid) {
-                component.mesh =
-                        arti::asset::AssetHandle<engine::asset::MeshAsset>{ state.mesh_applied };
-            }
-            for (size_t i = 0; i < state.material_texts.size(); ++i) {
-                core::UUID material_uuid;
-                if (parseUuidText(state.material_texts[i], material_uuid)) {
-                    component.materials.push_back(
-                            arti::asset::AssetHandle<engine::asset::MaterialAsset>{ material_uuid });
-                }
-            }
-            entity.addComponent<engine::MeshRendererComponent>(std::move(component));
-        }
-    } else {
-        ImGui::Checkbox("Visible", &mesh_renderer->visible);
-        if (ImGui::SmallButton("Remove##MeshRenderer")) {
-            entity.removeComponent<engine::MeshRendererComponent>();
-        }
+        mesh_renderer->materials.emplace_back();
     }
 }
 
@@ -284,18 +463,16 @@ void InspectorPanel::drawDirectionalLightComponent(scene::Entity& entity) {
         return;
     }
 
-    if (!ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (!drawComponentHeader<engine::DirectionalLightComponent>(entity, "Directional Light",
+                /*default_open=*/true, "Direction comes from the Transform's -Z axis")) {
         return;
     }
 
-    ImGui::Checkbox("Enabled", &light->enabled);
-    ImGui::ColorEdit3("Color", glm::value_ptr(light->color));
-    ImGui::DragFloat("Intensity", &light->intensity, 0.1f, 0.0f, 100.0f);
-    ImGui::TextDisabled("Direction comes from Transform's -Z axis");
-
-    if (ImGui::SmallButton("Remove##DirectionalLight")) {
-        entity.removeComponent<engine::DirectionalLightComponent>();
-    }
+    beginPropertyGrid();
+    drawBoolRow("Enabled", &light->enabled);
+    drawColorRow("Color", light->color);
+    drawFloatRow("Intensity", &light->intensity, 0.1f, 0.0f, 100.0f, "%.2f");
+    endPropertyGrid();
 }
 
 void InspectorPanel::drawPointLightComponent(scene::Entity& entity) {
@@ -304,20 +481,19 @@ void InspectorPanel::drawPointLightComponent(scene::Entity& entity) {
         return;
     }
 
-    if (!ImGui::CollapsingHeader("Point Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (!drawComponentHeader<engine::PointLightComponent>(entity, "Point Light",
+                /*default_open=*/true, "Position comes from the Transform")) {
         return;
     }
 
-    ImGui::Checkbox("Enabled", &light->enabled);
-    ImGui::ColorEdit3("Color", glm::value_ptr(light->color));
-    ImGui::DragFloat("Intensity", &light->intensity, 0.1f, 0.0f, 1000.0f);
+    beginPropertyGrid();
+    drawBoolRow("Enabled", &light->enabled);
+    drawColorRow("Color", light->color);
+    drawFloatRow("Intensity", &light->intensity, 0.1f, 0.0f, 1000.0f, "%.2f");
     // 下限不是 0：range 为 0 时距离衰减整个塌掉，这个灯什么都照不亮，看起来像坏了。
-    ImGui::DragFloat("Range", &light->range, 0.1f, 0.01f, 1000.0f);
-    ImGui::TextDisabled("Position comes from Transform");
-
-    if (ImGui::SmallButton("Remove##PointLight")) {
-        entity.removeComponent<engine::PointLightComponent>();
-    }
+    drawFloatRow("Range", &light->range, 0.1f, 0.01f, 1000.0f, "%.2f",
+            "Distance at which the light fades to zero (1/d² falloff)");
+    endPropertyGrid();
 }
 
 void InspectorPanel::drawSpotLightComponent(scene::Entity& entity) {
@@ -326,24 +502,22 @@ void InspectorPanel::drawSpotLightComponent(scene::Entity& entity) {
         return;
     }
 
-    if (!ImGui::CollapsingHeader("Spot Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (!drawComponentHeader<engine::SpotLightComponent>(entity, "Spot Light",
+                /*default_open=*/true, "Position and -Z direction come from the Transform")) {
         return;
     }
 
-    ImGui::Checkbox("Enabled", &light->enabled);
-    ImGui::ColorEdit3("Color", glm::value_ptr(light->color));
-    ImGui::DragFloat("Intensity", &light->intensity, 0.1f, 0.0f, 1000.0f);
-    ImGui::DragFloat("Range", &light->range, 0.1f, 0.01f, 1000.0f);
+    beginPropertyGrid();
+    drawBoolRow("Enabled", &light->enabled);
+    drawColorRow("Color", light->color);
+    drawFloatRow("Intensity", &light->intensity, 0.1f, 0.0f, 1000.0f, "%.2f");
+    drawFloatRow("Range", &light->range, 0.1f, 0.01f, 1000.0f, "%.2f");
     // 上限 89 而不是 90：到 90° 时锥面就是一个半平面，cos 为 0，角度衰减的分母会塌。
-    ImGui::DragFloat("Inner Cone", &light->inner_cone_degrees, 0.5f, 0.0f, 89.0f, "%.1f deg");
-    ImGui::DragFloat("Outer Cone", &light->outer_cone_degrees, 0.5f, 0.0f, 89.0f, "%.1f deg");
+    drawFloatRow("Inner Cone", &light->inner_cone_degrees, 0.5f, 0.0f, 89.0f, "%.1f deg");
+    drawFloatRow("Outer Cone", &light->outer_cone_degrees, 0.5f, 0.0f, 89.0f, "%.1f deg");
+    endPropertyGrid();
     // 内锥比外锥大是无意义的配置（渲染端会夹住，但面板上先纠正过来，免得看着像 bug）。
     light->inner_cone_degrees = std::min(light->inner_cone_degrees, light->outer_cone_degrees);
-    ImGui::TextDisabled("Position and -Z direction come from Transform");
-
-    if (ImGui::SmallButton("Remove##SpotLight")) {
-        entity.removeComponent<engine::SpotLightComponent>();
-    }
 }
 
 void InspectorPanel::drawEnvironmentComponent(scene::Entity& entity) {
@@ -352,30 +526,33 @@ void InspectorPanel::drawEnvironmentComponent(scene::Entity& entity) {
         return;
     }
 
-    if (!ImGui::CollapsingHeader("Environment", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (!drawComponentHeader<engine::EnvironmentComponent>(entity, "Environment",
+                /*default_open=*/true,
+                "Without an equirect texture, the sky color acts as constant ambient")) {
         return;
     }
 
-    // UUID 输入框的文本要跨帧保留（用户可能输到一半），所以和 MeshRenderer 一样按实体存一份。
     auto& text = environmentEditorStates()[entity.getComponent<scene::IDComponent>().id];
     if (text.empty()) {
         text = uuidToText(environment->equirect_texture.id());
     }
+
+    beginPropertyGrid();
+
+    propertyRow("Equirect Texture");
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
     core::UUID applied{};
-    if (drawUuidInput("Equirect Texture", text, applied)) {
+    if (drawUuidInput("##equirect_uuid", text, applied)) {
         environment->equirect_texture =
                 arti::asset::AssetHandle<engine::asset::TextureAsset>{ applied };
     }
 
-    ImGui::Checkbox("Enabled", &environment->enabled);
-    ImGui::Checkbox("Sky Visible", &environment->sky_visible);
-    ImGui::ColorEdit3("Sky Color", glm::value_ptr(environment->sky_color));
-    ImGui::DragFloat("Intensity", &environment->intensity, 0.05f, 0.0f, 100.0f);
-    ImGui::TextDisabled("No equirect texture: sky color acts as a constant ambient");
+    drawBoolRow("Enabled", &environment->enabled);
+    drawBoolRow("Sky Visible", &environment->sky_visible);
+    drawColorRow("Sky Color", environment->sky_color);
+    drawFloatRow("Intensity", &environment->intensity, 0.05f, 0.0f, 100.0f, "%.2f");
 
-    if (ImGui::SmallButton("Remove##Environment")) {
-        entity.removeComponent<engine::EnvironmentComponent>();
-    }
+    endPropertyGrid();
 }
 
 } // namespace arti::editor

@@ -9,6 +9,7 @@ namespace arti::engine::asset {
 
 inline constexpr core::UUID kBuiltinCubeMesh{ 0xB0117E1000000001ULL };
 inline constexpr core::UUID kBuiltinDefaultMaterial{ 0xB0117E1000000002ULL };
+inline constexpr core::UUID kBuiltinSphereMesh{ 0xB0117E1000000003ULL };
 
 // 把 builtin 资产登记进 catalog（AssetOrigin::Engine），并保证它们的 artifact
 // 存在。同时注册成 AssetManager 的 engine asset provider，使每轮 reconcile

@@ -205,7 +205,7 @@ int run() {
     }
 
     // Step 4: builtin 资产在 catalog 里，但不往 Assets/ 写任何 .meta。
-    if (!require(pipeline.engineAssets().size() == 2, "builtin assets were not registered") ||
+    if (!require(pipeline.engineAssets().size() == 3, "builtin assets were not registered") ||
             !require(countMetadataFiles(assets) == 0,
                     "builtin assets wrote .meta sidecars into Assets/")) {
         return 1;
@@ -325,7 +325,7 @@ int run() {
         return 1;
     }
     if (!require(pipeline.open(assets, artifacts), "failed to reopen the asset pipeline") ||
-            !require(pipeline.engineAssets().size() == 2,
+            !require(pipeline.engineAssets().size() == 3,
                     "builtin assets were not registered after reopen") ||
             !require(pipeline.checkIntegrity().succeeded(),
                     "builtin artifacts were not regenerated after being deleted") ||
