@@ -134,6 +134,66 @@ DirectionalLightComponent DirectionalLightSerialization::deserialize(const YAML:
     return component;
 }
 
+YAML::Node PointLightSerialization::serialize(const PointLightComponent& component) const {
+    YAML::Node node;
+    node["Color"] = writeVector3(component.color);
+    node["Intensity"] = component.intensity;
+    node["Range"] = component.range;
+    node["Enabled"] = component.enabled;
+    return node;
+}
+
+PointLightComponent PointLightSerialization::deserialize(const YAML::Node& node) const {
+    requireMap(node, "PointLight");
+
+    PointLightComponent component;
+    component.color = readVector3(node["Color"], component.color);
+    if (node["Intensity"]) {
+        component.intensity = node["Intensity"].as<float>();
+    }
+    if (node["Range"]) {
+        component.range = node["Range"].as<float>();
+    }
+    if (node["Enabled"]) {
+        component.enabled = node["Enabled"].as<bool>();
+    }
+    return component;
+}
+
+YAML::Node SpotLightSerialization::serialize(const SpotLightComponent& component) const {
+    YAML::Node node;
+    node["Color"] = writeVector3(component.color);
+    node["Intensity"] = component.intensity;
+    node["Range"] = component.range;
+    node["InnerConeDegrees"] = component.inner_cone_degrees;
+    node["OuterConeDegrees"] = component.outer_cone_degrees;
+    node["Enabled"] = component.enabled;
+    return node;
+}
+
+SpotLightComponent SpotLightSerialization::deserialize(const YAML::Node& node) const {
+    requireMap(node, "SpotLight");
+
+    SpotLightComponent component;
+    component.color = readVector3(node["Color"], component.color);
+    if (node["Intensity"]) {
+        component.intensity = node["Intensity"].as<float>();
+    }
+    if (node["Range"]) {
+        component.range = node["Range"].as<float>();
+    }
+    if (node["InnerConeDegrees"]) {
+        component.inner_cone_degrees = node["InnerConeDegrees"].as<float>();
+    }
+    if (node["OuterConeDegrees"]) {
+        component.outer_cone_degrees = node["OuterConeDegrees"].as<float>();
+    }
+    if (node["Enabled"]) {
+        component.enabled = node["Enabled"].as<bool>();
+    }
+    return component;
+}
+
 YAML::Node EnvironmentSerialization::serialize(const EnvironmentComponent& component) const {
     YAML::Node node;
     node["EquirectTexture"] = writeUUID(component.equirect_texture.id());
@@ -172,6 +232,12 @@ void registerSceneSerialization(scene::SceneSerializationRegistry& registry) {
     registry.registerComponent<DirectionalLightComponent>(
             std::string{ DirectionalLightSerialization::typeName() },
             std::make_unique<DirectionalLightSerialization>());
+    registry.registerComponent<PointLightComponent>(
+            std::string{ PointLightSerialization::typeName() },
+            std::make_unique<PointLightSerialization>());
+    registry.registerComponent<SpotLightComponent>(
+            std::string{ SpotLightSerialization::typeName() },
+            std::make_unique<SpotLightSerialization>());
     registry.registerComponent<EnvironmentComponent>(
             std::string{ EnvironmentSerialization::typeName() },
             std::make_unique<EnvironmentSerialization>());

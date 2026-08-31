@@ -20,6 +20,8 @@ private:
     void drawCameraComponent(scene::Entity& entity);
     void drawMeshRendererComponent(scene::Entity& entity);
     void drawDirectionalLightComponent(scene::Entity& entity);
+    void drawPointLightComponent(scene::Entity& entity);
+    void drawSpotLightComponent(scene::Entity& entity);
     void drawEnvironmentComponent(scene::Entity& entity);
 
     EditorContext& m_context;

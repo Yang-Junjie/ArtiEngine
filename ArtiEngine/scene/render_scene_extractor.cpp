@@ -60,6 +60,40 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         m_render_scene.lights.push_back(desc);
     }
 
+    for (const auto [entity, world, light]:
+            scene.view<scene::WorldTransformComponent, PointLightComponent>().each()) {
+        if (!light.enabled) {
+            continue;
+        }
+        rendering::LightDesc desc;
+        desc.type = rendering::LightType::Point;
+        // 点光源没有朝向，位置从世界矩阵的平移列取。
+        desc.position = glm::vec3{ world.world[3] };
+        desc.color = glm::vec4{ light.color, 1.0f };
+        desc.intensity = light.intensity;
+        desc.range = light.range;
+        m_render_scene.lights.push_back(desc);
+    }
+
+    for (const auto [entity, world, light]:
+            scene.view<scene::WorldTransformComponent, SpotLightComponent>().each()) {
+        if (!light.enabled) {
+            continue;
+        }
+        rendering::LightDesc desc;
+        desc.type = rendering::LightType::Spot;
+        desc.position = glm::vec3{ world.world[3] };
+        // 锥轴和方向光同一个约定：-Z 是朝向。
+        desc.direction = forwardOf(world.world);
+        desc.color = glm::vec4{ light.color, 1.0f };
+        desc.intensity = light.intensity;
+        desc.range = light.range;
+        // 组件存的是角度（面板上好编辑），LightDesc 那边是弧度，在这里转一次。
+        desc.inner_cone_radians = glm::radians(light.inner_cone_degrees);
+        desc.outer_cone_radians = glm::radians(light.outer_cone_degrees);
+        m_render_scene.lights.push_back(desc);
+    }
+
     for (const auto [entity, environment]: scene.view<EnvironmentComponent>().each()) {
         rendering::EnvironmentDesc desc;
         desc.equirectangular_texture = assets.textureHandle(environment.equirect_texture.id());

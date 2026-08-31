@@ -35,6 +35,36 @@ struct DirectionalLightComponent {
     bool enabled{ true };
 };
 
+// 点光源。位置来自 WorldTransformComponent，所以这里没有 position 字段。
+struct PointLightComponent {
+    glm::vec3 color{ 1.0f, 1.0f, 1.0f };
+    // 默认值刻意比方向光大得多：点光源带 1/d² 衰减，intensity 1 在 5 个单位远的地方只剩 0.04，
+    // 加进来会像是没生效。25 让 5 个单位处大致等效于 intensity 1 的方向光。
+    //
+    // 这个数不是光度学单位（和 LightDesc::intensity 一样只是个纯倍数）—— 真要 lumen / candela
+    // 那套，得连相机曝光一起改，见 TonemapPass。
+    float intensity{ 25.0f };
+    // 影响半径。衰减在这个距离上平滑地归零，不是硬截断 —— 所以它既是「照多远」也是将来做
+    // 光源剔除的包围球半径。
+    float range{ 10.0f };
+    bool enabled{ true };
+};
+
+// 聚光灯。位置和朝向都来自 WorldTransformComponent（朝向是 -Z），和方向光一致。
+struct SpotLightComponent {
+    glm::vec3 color{ 1.0f, 1.0f, 1.0f };
+    // 和点光源同一个理由（1/d² 衰减），见那边的说明。
+    float intensity{ 25.0f };
+    float range{ 10.0f };
+    // 内锥以内是满强度，内外之间平滑过渡，外锥以外全黑。
+    //
+    // 存角度而不是弧度：面板上直接编辑，序列化出来也读得懂。转弧度在 extractor 里做一次
+    // —— rendering::LightDesc 那边是弧度。
+    float inner_cone_degrees{ 20.0f };
+    float outer_cone_degrees{ 30.0f };
+    bool enabled{ true };
+};
+
 struct EnvironmentComponent {
     arti::asset::AssetHandle<asset::TextureAsset> equirect_texture;
     glm::vec3 sky_color{ 0.03f, 0.03f, 0.035f };

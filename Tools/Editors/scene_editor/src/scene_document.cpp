@@ -200,6 +200,25 @@ void SceneDocument::populateDefault() {
             glm::quat{ glm::vec3{ glm::radians(-50.0f), glm::radians(-30.0f), 0.0f } };
     sun.addComponent<engine::DirectionalLightComponent>();
 
+    // 点光源和聚光灯：默认场景里各放一个，这样新建场景就能直接看出这两种灯的行为
+    // （1/d² 衰减、锥角落差），不用自己先加组件再摆位置。强度用组件的默认值 —— 那个值就是
+    // 按「摆在这个距离上应该看得清」定的。
+    auto point_light = scene.createEntity("Point Light");
+    point_light.getComponent<scene::TransformComponent>().translation =
+            glm::vec3{ -1.6f, 1.2f, 1.2f };
+    auto& point = point_light.addComponent<engine::PointLightComponent>();
+    point.color = glm::vec3{ 1.0f, 0.75f, 0.5f };
+    point.range = 5.0f;
+
+    auto spot_light = scene.createEntity("Spot Light");
+    auto& spot_transform = spot_light.getComponent<scene::TransformComponent>();
+    spot_transform.translation = glm::vec3{ 1.6f, 2.5f, 0.8f };
+    // 绕 X 转 -90°：默认朝向是 -Z，转过来正好朝正下方。
+    spot_transform.rotation = glm::quat{ glm::vec3{ glm::radians(-90.0f), 0.0f, 0.0f } };
+    auto& spot = spot_light.addComponent<engine::SpotLightComponent>();
+    spot.color = glm::vec3{ 0.6f, 0.8f, 1.0f };
+    spot.range = 6.0f;
+
     auto environment = scene.createEntity("Environment");
     environment.addComponent<engine::EnvironmentComponent>();
 

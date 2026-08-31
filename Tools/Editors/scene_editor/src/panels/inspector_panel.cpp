@@ -99,6 +99,8 @@ void InspectorPanel::draw() {
     drawCameraComponent(entity);
     drawMeshRendererComponent(entity);
     drawDirectionalLightComponent(entity);
+    drawPointLightComponent(entity);
+    drawSpotLightComponent(entity);
     drawEnvironmentComponent(entity);
 
     ImGui::Separator();
@@ -117,6 +119,14 @@ void InspectorPanel::draw() {
         if (ImGui::MenuItem("Directional Light", nullptr, false,
                     !entity.hasComponent<engine::DirectionalLightComponent>())) {
             entity.addComponent<engine::DirectionalLightComponent>();
+        }
+        if (ImGui::MenuItem("Point Light", nullptr, false,
+                    !entity.hasComponent<engine::PointLightComponent>())) {
+            entity.addComponent<engine::PointLightComponent>();
+        }
+        if (ImGui::MenuItem("Spot Light", nullptr, false,
+                    !entity.hasComponent<engine::SpotLightComponent>())) {
+            entity.addComponent<engine::SpotLightComponent>();
         }
         if (ImGui::MenuItem("Environment", nullptr, false,
                     !entity.hasComponent<engine::EnvironmentComponent>())) {
@@ -282,6 +292,54 @@ void InspectorPanel::drawDirectionalLightComponent(scene::Entity& entity) {
 
     if (ImGui::SmallButton("Remove##DirectionalLight")) {
         entity.removeComponent<engine::DirectionalLightComponent>();
+    }
+}
+
+void InspectorPanel::drawPointLightComponent(scene::Entity& entity) {
+    auto* light = tryGet<engine::PointLightComponent>(entity);
+    if (light == nullptr) {
+        return;
+    }
+
+    if (!ImGui::CollapsingHeader("Point Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+
+    ImGui::Checkbox("Enabled", &light->enabled);
+    ImGui::ColorEdit3("Color", glm::value_ptr(light->color));
+    ImGui::DragFloat("Intensity", &light->intensity, 0.1f, 0.0f, 1000.0f);
+    // 下限不是 0：range 为 0 时距离衰减整个塌掉，这个灯什么都照不亮，看起来像坏了。
+    ImGui::DragFloat("Range", &light->range, 0.1f, 0.01f, 1000.0f);
+    ImGui::TextDisabled("Position comes from Transform");
+
+    if (ImGui::SmallButton("Remove##PointLight")) {
+        entity.removeComponent<engine::PointLightComponent>();
+    }
+}
+
+void InspectorPanel::drawSpotLightComponent(scene::Entity& entity) {
+    auto* light = tryGet<engine::SpotLightComponent>(entity);
+    if (light == nullptr) {
+        return;
+    }
+
+    if (!ImGui::CollapsingHeader("Spot Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+
+    ImGui::Checkbox("Enabled", &light->enabled);
+    ImGui::ColorEdit3("Color", glm::value_ptr(light->color));
+    ImGui::DragFloat("Intensity", &light->intensity, 0.1f, 0.0f, 1000.0f);
+    ImGui::DragFloat("Range", &light->range, 0.1f, 0.01f, 1000.0f);
+    // 上限 89 而不是 90：到 90° 时锥面就是一个半平面，cos 为 0，角度衰减的分母会塌。
+    ImGui::DragFloat("Inner Cone", &light->inner_cone_degrees, 0.5f, 0.0f, 89.0f, "%.1f deg");
+    ImGui::DragFloat("Outer Cone", &light->outer_cone_degrees, 0.5f, 0.0f, 89.0f, "%.1f deg");
+    // 内锥比外锥大是无意义的配置（渲染端会夹住，但面板上先纠正过来，免得看着像 bug）。
+    light->inner_cone_degrees = std::min(light->inner_cone_degrees, light->outer_cone_degrees);
+    ImGui::TextDisabled("Position and -Z direction come from Transform");
+
+    if (ImGui::SmallButton("Remove##SpotLight")) {
+        entity.removeComponent<engine::SpotLightComponent>();
     }
 }
 

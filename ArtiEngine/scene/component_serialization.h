@@ -31,6 +31,22 @@ public:
     DirectionalLightComponent deserialize(const YAML::Node& node) const override;
 };
 
+class PointLightSerialization final : public scene::ComponentSerialization<PointLightComponent> {
+public:
+    static constexpr std::string_view typeName() noexcept { return "artiengine.point_light"; }
+
+    YAML::Node serialize(const PointLightComponent& component) const override;
+    PointLightComponent deserialize(const YAML::Node& node) const override;
+};
+
+class SpotLightSerialization final : public scene::ComponentSerialization<SpotLightComponent> {
+public:
+    static constexpr std::string_view typeName() noexcept { return "artiengine.spot_light"; }
+
+    YAML::Node serialize(const SpotLightComponent& component) const override;
+    SpotLightComponent deserialize(const YAML::Node& node) const override;
+};
+
 class EnvironmentSerialization final : public scene::ComponentSerialization<EnvironmentComponent> {
 public:
     static constexpr std::string_view typeName() noexcept { return "artiengine.environment"; }
