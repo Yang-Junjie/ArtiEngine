@@ -1,6 +1,7 @@
 #include "asset_tools/asset_packer.h"
 #include "asset_tools/asset_pipeline.h"
 
+#include "artichoco/core/io/paths.h"
 #include "artichoco/core/log.h"
 #include "artichoco/project/project_manager.h"
 
@@ -21,7 +22,8 @@ void printUsage() {
               << "  asset_tools set     <project.artiproj> <source> <key> <value|->\n"
               << "  asset_tools extract <project.artiproj> <material-uuid> [destination]\n"
               << "  asset_tools pack    <project.artiproj> <output-dir> "
-                 "[--overwrite] [--no-reconcile]\n";
+                 "[--overwrite] [--no-reconcile]\n"
+              << "                      [--no-runtime] [--no-player]\n";
 }
 
 std::string_view layerName(arti::asset::SettingLayer layer) {
@@ -153,12 +155,18 @@ int run(int argc, char** argv) {
     if (command == "pack") {
         arti::tools::asset::PackOptions options;
         options.output_dir = std::filesystem::path{ argv[3] };
+        // 运行时文件从 asset_tools 自己旁边取 —— staging 已经把 DLL 和 shaders/ 放在那里了。
+        options.runtime_dir = arti::core::executableDir();
         for (int index = 4; index < argc; ++index) {
             const std::string_view flag{ argv[index] };
             if (flag == "--overwrite") {
                 options.overwrite = true;
             } else if (flag == "--no-reconcile") {
                 options.reconcile = false;
+            } else if (flag == "--no-runtime") {
+                options.runtime_dir.clear();
+            } else if (flag == "--no-player") {
+                options.copy_player = false;
             } else {
                 std::cerr << "Unknown pack option: " << flag << '\n';
                 printUsage();
@@ -170,15 +178,22 @@ int run(int argc, char** argv) {
         for (const auto& error: report.errors) {
             std::cerr << "error: " << error << '\n';
         }
+        for (const auto& warning: report.warnings) {
+            std::cerr << "warning: " << warning << '\n';
+        }
         if (!report.succeeded) {
             return 1;
         }
         std::cout << "Packed " << report.assets << " asset(s), " << report.artifacts_copied
-                  << " artifact(s), " << report.scenes_copied << " scene(s) into "
+                  << " artifact(s), " << report.scenes_copied << " scene(s), "
+                  << report.runtime_files_copied << " runtime file(s) into "
                   << report.output_dir.generic_string() << '\n'
                   << "  " << report.project_file.filename().generic_string() << '\n'
-                  << "  " << report.manifest_file.filename().generic_string() << '\n'
-                  << "Copy arti_player.exe into that directory to run it." << '\n';
+                  << "  " << report.manifest_file.filename().generic_string() << '\n';
+        if (options.runtime_dir.empty()) {
+            std::cout << "Runtime files were skipped (--no-runtime); the build will not run "
+                         "until they are added.\n";
+        }
         return 0;
     }
 

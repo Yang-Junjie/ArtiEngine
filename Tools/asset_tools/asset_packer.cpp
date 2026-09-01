@@ -6,6 +6,8 @@
 #include "artichoco/project/project_manager.h"
 
 #include <fstream>
+#include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_set>
 #include <utility>
@@ -78,6 +80,115 @@ bool writeTextFile(const std::filesystem::path& file, const std::string& text,
         fail(report, "failed to write '" + file.string() + "'");
         return false;
     }
+    return true;
+}
+
+// Windows 上播放器带 .exe，别的平台不带。
+#if defined(_WIN32)
+constexpr std::string_view kPlayerFileName{ "arti_player.exe" };
+#else
+constexpr std::string_view kPlayerFileName{ "arti_player" };
+#endif
+
+// 运行时文件：DLL + shaders/ + 播放器。来源是 options.runtime_dir，也就是 asset_tools 自己
+// 所在的目录 —— staging 已经把这些东西放在那里了（见 artichoco_stage_vulkan_sdk_runtime 和
+// artirenderer_stage_shaders）。
+//
+// 缺 DLL 或缺 shaders/ 算失败：那样的产物一定跑不起来，而「打出一份跑不起来的包」比打包
+// 失败糟得多 —— 和上面 checkIntegrity() 的态度一致。
+bool copyRuntimeFiles(const PackOptions& options, const std::filesystem::path& output_dir,
+        PackReport& report) {
+    std::error_code error;
+    const auto runtime_dir = std::filesystem::absolute(options.runtime_dir, error);
+    if (error || !std::filesystem::is_directory(runtime_dir, error) || error) {
+        fail(report, "the runtime directory does not exist: " + options.runtime_dir.string());
+        return false;
+    }
+
+    // DLL 按扩展名通配，不硬编码文件名：Debug 和 Release 的名字不一样（SDL3d.dll /
+    // SDL3.dll），而 slang.dll 动态加载的 slang-compiler.dll 也在这一批里。
+    std::size_t dll_count = 0;
+    std::filesystem::directory_iterator entries{ runtime_dir, error };
+    const std::filesystem::directory_iterator entries_end;
+    if (error) {
+        fail(report, "failed to scan '" + runtime_dir.string() + "': " + error.message());
+        return false;
+    }
+    for (; !error && entries != entries_end; entries.increment(error)) {
+        if (!entries->is_regular_file(error) || error) {
+            continue;
+        }
+        if (entries->path().extension() != ".dll") {
+            continue;
+        }
+        if (!copyOneFile(entries->path(), output_dir / entries->path().filename(), report)) {
+            return false;
+        }
+        ++dll_count;
+    }
+    if (error) {
+        fail(report, "failed while scanning for runtime libraries: " + error.message());
+        return false;
+    }
+#if defined(_WIN32)
+    // 非 Windows 上运行时依赖走 rpath，目录里本来就没有 .dll，所以这条只在 Windows 上是错误。
+    if (dll_count == 0) {
+        fail(report, "no runtime library found in '" + runtime_dir.string() +
+                        "'; build the tools first so that staging has run");
+        return false;
+    }
+#endif
+    report.runtime_files_copied += dll_count;
+
+    // 着色器整目录拷。运行期编译，所以缺一个就是一条画不出来的管线；而且 .slang 之间有
+    // #include，半份目录比没有目录更难查。
+    const auto shader_dir = runtime_dir / "shaders";
+    if (!std::filesystem::is_directory(shader_dir, error) || error) {
+        fail(report, "no 'shaders' directory next to the packer (" + shader_dir.string() +
+                        "); build the tools first so that staging has run");
+        return false;
+    }
+    std::size_t shader_count = 0;
+    std::filesystem::recursive_directory_iterator shaders{ shader_dir,
+        std::filesystem::directory_options::skip_permission_denied, error };
+    const std::filesystem::recursive_directory_iterator shaders_end;
+    while (!error && shaders != shaders_end) {
+        if (shaders->is_regular_file(error) && !error) {
+            const auto relative = std::filesystem::relative(shaders->path(), shader_dir, error);
+            if (error) {
+                break;
+            }
+            if (!copyOneFile(shaders->path(), output_dir / "shaders" / relative, report)) {
+                return false;
+            }
+            ++shader_count;
+        }
+        shaders.increment(error);
+    }
+    if (error) {
+        fail(report, "failed while copying shaders: " + error.message());
+        return false;
+    }
+    if (shader_count == 0) {
+        fail(report, "the 'shaders' directory next to the packer is empty");
+        return false;
+    }
+    report.runtime_files_copied += shader_count;
+
+    if (!options.copy_player) {
+        return true;
+    }
+    // 播放器缺了只提示：CI 里 pack 和 player 可能分开构建，那种产物补一个 exe 就能用。
+    const auto player = runtime_dir / kPlayerFileName;
+    if (!std::filesystem::is_regular_file(player, error) || error) {
+        report.warnings.push_back("no '" + std::string{ kPlayerFileName } + "' next to the packer; "
+                "copy it into the output directory by hand to make the build runnable");
+        return true;
+    }
+    if (!copyOneFile(player, output_dir / kPlayerFileName, report)) {
+        return false;
+    }
+    ++report.runtime_files_copied;
     return true;
 }
 
@@ -204,6 +315,12 @@ PackReport pack(AssetPipeline& pipeline, const PackOptions& options) {
     }
     if (error) {
         fail(report, "failed while scanning for scenes: " + error.message());
+        return report;
+    }
+
+    // 运行时文件放在最后：前面任何一步失败都不会留下一个「有 exe 没资产」的半成品目录。
+    // runtime_dir 为空表示调用方明确只要资产（CLI 的 --no-runtime）。
+    if (!options.runtime_dir.empty() && !copyRuntimeFiles(options, output_dir, report)) {
         return report;
     }
 

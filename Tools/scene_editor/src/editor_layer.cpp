@@ -24,6 +24,7 @@
 #include "scene/components.h"
 
 #include "artichoco/core/application.h"
+#include "artichoco/core/io/paths.h"
 #include "artichoco/platform/window/sdl_vulkan_surface_source.h"
 #include "artichoco/renderer/render_device.h"
 #include "artichoco/scene/entity.h"
@@ -32,6 +33,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
+#include <system_error>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
@@ -49,6 +52,22 @@ std::string sourceStemName(const std::filesystem::path& source_path) {
         name = name.substr(0, dot);
     }
     return name.empty() ? "Entity" : name;
+}
+
+// UI 字体的两段查找：exe 旁边的 resources/ 优先，没有才用构建期注入的源码树路径。
+// 和 shader 同一个套路（见 shader_paths.cpp），为了让构建产物可搬移。
+//
+// 两边都没有时返回源码树那个路径，而不是空：ImGuiHost 加载失败会退回内建位图字体并记一条
+// warn，那条 warn 里带着路径才能看出它去哪找了。
+std::filesystem::path uiFontPath() {
+    constexpr const char* kRelative = "fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
+
+    const auto staged = core::executableDir() / "resources" / kRelative;
+    std::error_code error;
+    if (std::filesystem::is_regular_file(staged, error) && !error) {
+        return staged;
+    }
+    return std::filesystem::path{ ARTIENGINE_TOOLS_RES_DIR } / kRelative;
 }
 
 } // namespace
@@ -81,8 +100,7 @@ void EditorLayer::onAttach() {
     engine::ImGuiHostCreateInfo imgui_info;
     imgui_info.persist_layout = true;
     imgui_info.docking = true;
-    imgui_info.font_path = std::filesystem::path{ ARTIENGINE_TOOLS_RES_DIR } / "fonts" /
-                           "Noto_Sans_SC" / "static" / "NotoSansSC-Regular.ttf";
+    imgui_info.font_path = uiFontPath();
     m_imgui = std::make_unique<engine::ImGuiHost>(app.getWindow(), *m_renderer, imgui_info);
 
     m_hierarchy_panel = std::make_unique<HierarchyPanel>(*m_context);

@@ -19,8 +19,9 @@ target_compile_features(scene_editor PRIVATE cxx_std_20)
 # 后者的层数会随文件挪窝而失效。
 target_include_directories(scene_editor PRIVATE src)
 
-# UI 字体直接从源码树读，和 ARTIRENDERER_SHADER_DIR 一个套路：换字体不用重新编译 C++，
-# 代价是二进制不可搬移。编辑器是开发期工具，这个取舍是划算的；真要发布得改成拷到 exe 旁边。
+# UI 字体的**回落**路径，和 ARTIRENDERER_SHADER_DIR 一个套路：优先用 exe 旁边 POST_BUILD
+# 拷过去的那份（见文件末尾），没有才回落到这里。保留源码树这条是为了换字体不用重编 C++；
+# 两段查找在 src/editor_layer.cpp 里。
 target_compile_definitions(scene_editor PRIVATE
     ARTIENGINE_TOOLS_RES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../resources"
 )
@@ -47,4 +48,16 @@ target_link_libraries(scene_editor
 set_target_properties(scene_editor PROPERTIES
     FOLDER "Tools/Editors"
     OUTPUT_NAME "scene_editor"
+)
+# 运行时依赖和内建 shader 拷到 exe 旁边，和 arti_player 一致。
+artichoco_stage_vulkan_sdk_runtime(scene_editor)
+artirenderer_stage_shaders(scene_editor)
+
+# UI 资源（字体）拷到 exe 旁边。ARTIENGINE_TOOLS_RES_DIR 只是回落，优先用这一份，
+# 见 src/editor_layer.cpp 里的两段查找。
+add_custom_command(TARGET scene_editor POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../resources"
+        "$<TARGET_FILE_DIR:scene_editor>/resources"
+    VERBATIM
 )
