@@ -80,7 +80,7 @@ void EditorLayer::onAttach() {
     engine::ImGuiHostCreateInfo imgui_info;
     imgui_info.persist_layout = true;
     imgui_info.docking = true;
-    imgui_info.font_path = std::filesystem::path{ ARTIENGINE_TOOLS_ASSET_DIR } / "fonts" /
+    imgui_info.font_path = std::filesystem::path{ ARTIENGINE_TOOLS_RES_DIR } / "fonts" /
                            "Noto_Sans_SC" / "static" / "NotoSansSC-Regular.ttf";
     m_imgui = std::make_unique<engine::ImGuiHost>(app.getWindow(), *m_renderer, imgui_info);
 

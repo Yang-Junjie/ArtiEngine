@@ -21,7 +21,7 @@ target_include_directories(scene_editor PRIVATE src)
 # UI 字体直接从源码树读，和 ARTIRENDERER_SHADER_DIR 一个套路：换字体不用重新编译 C++，
 # 代价是二进制不可搬移。编辑器是开发期工具，这个取舍是划算的；真要发布得改成拷到 exe 旁边。
 target_compile_definitions(scene_editor PRIVATE
-    ARTIENGINE_TOOLS_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tools_asset"
+    ARTIENGINE_TOOLS_RES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../resources"
 )
 
 target_link_libraries(scene_editor
