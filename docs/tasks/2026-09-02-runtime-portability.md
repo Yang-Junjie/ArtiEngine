@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 未开始 |
+| **状态** | 已完成（待 push）|
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（本仓库）、ArtiRenderer（submodule）、ArtiChoco（ArtiRenderer 的 submodule） |
@@ -14,12 +14,36 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：阶段 0 完成（0.1 / 0.2 / 0.3 已勾）。阶段 0 的实测**改变了方案** ——
-新增了 D6 和阶段 1 的 1.5 / 1.6 两步，动手前先读它们。
+**当前进度**：**全部完成**（阶段 0～5 共 24 步全部打勾）。端到端验收通过：clean PATH +
+两条回落路径改名失效的情况下，打包产物跑出 `First frame rendered (4 draw calls)` 并干净退出。
 
-**下一步**：阶段 1.1，新建 `ArtiRenderer/ArtiChoco/artichoco/core/io/paths.h`。
+**下一步**：只剩 **push**（三层，由内向外，见 5.3）。推送是对外动作，等用户点头。
+除此之外这份任务没有遗留项。
 
-**阶段 0 的基线记录**（2026-09-02）：
+**做完之后的事实**（下一个人可以直接依赖这些）：
+
+- `core::executableDir()` 在 `ArtiChoco/artichoco/core/io/paths.h`，Windows / Linux 有实现。
+- 着色器：`exe/shaders/` 优先，回落 `ARTIRENDERER_SHADER_DIR`。**整目录二选一**，
+  选中哪个根有一条 info 日志。加新 `.slang` 不用改 staging（整目录拷）。
+- 字体：`exe/resources/` 优先，回落 `ARTIENGINE_TOOLS_RES_DIR`。
+- 三个 exe + `asset_pipeline_smoke` 都 staging 运行时依赖；`arti_player` / `scene_editor` /
+  `asset_tools` 还 staging shader。
+- `pack` 会把 `*.dll` + `shaders/` + `arti_player` 写进产物，来源是 `asset_tools` 自己的 exe
+  目录。新开关 `--no-runtime` / `--no-player`。
+- Debug 下 `build/bin` 应该恰好有 3 个 DLL：`SDL3d.dll` / `slang.dll` / `slang-compiler.dll`。
+  **多出 `slang-glslang*.dll` 之类说明有人把不需要的卫星 DLL 也拷了**，见 D6。
+
+**遗留 / 后续**（不属于本任务，已记进 `docs/Architecture/README.md` 的「明确未做」）：
+
+- **Release 发布未验收**。可搬移性是在 Debug 下验的，而 Debug 链的是调试 CRT
+  （`ucrtbased.dll` / `MSVCP140D.dll` / `VCRUNTIME140D.dll`）—— 那几个不可再分发，本机能跑只
+  是因为 System32 里装了。真要给别人跑必须 Release 构建打包，那条路还没走过。
+- **非 Windows 的可搬移性未验**。`artichoco_stage_vulkan_sdk_runtime()` 在非 Windows 上只设
+  `BUILD_RPATH`、不拷文件；`copyRuntimeFiles()` 里「没有 DLL 算失败」那条也包了 `_WIN32`。
+- **着色器仍是运行期编译**。产物里放的是 `.slang` 源码，不是 `.spv`。离线预编译是另一件事。
+- **打包没有编辑器入口**，只有 CLI。
+
+**阶段 0 的基线记录**（2026-09-02，动手前的状态，留作对照）：
 
 ```
 build/bin/ 里的 DLL：
@@ -30,40 +54,47 @@ cmake --version  →  4.2.1
 PATH 上有 C:\VulkanSDK\1.4.335.0\Bin        ← 正是它掩盖了问题
 ```
 
-**阶段 0 的实测结论**（每条都影响后续步骤）：
+**阶段 0 的实测结论**（每条都影响了后续步骤，留着是因为它们解释了代码里那几段注释为什么存在）：
 
 - **F1 · `ArtiVulkanSDK.cmake` 的 slang Debug 配对是错的。**
   链接行用的是 `slangd.lib`，但 `llvm-readobj --coff-imports slangd.lib` 显示它内嵌的 DLL 名是
   **`slang.dll`**；而 `IMPORTED_LOCATION_DEBUG` 指向 `slangd.dll` —— 那是 Slang 的 language
-  server（`slangd.exe` 的伴生 DLL），不是 debug 版 slang。所以 `$<TARGET_RUNTIME_DLLS>` 会拷
-  一个 exe 从不加载的文件，而真正需要的 `slang.dll` 一个都不拷。→ 新增步骤 1.5。
+  server（`slangd.exe` 的伴生 DLL），不是 debug 版 slang。所以 staging 会拷一个 exe 从不加载
+  的文件，而真正需要的 `slang.dll` 一个都不拷。→ 步骤 1.5 修的就是这个。
 - **F2 · `slang.dll` 只有 46 KB，是个转发器。** 真正 23 MB 的实现在 `slang-compiler.dll` 里，
-  由 `slang.dll` 在运行时 `LoadLibrary` 加载 —— **CMake 看不见这条依赖**，
-  `$<TARGET_RUNTIME_DLLS>` 不可能拷到它。→ 新增步骤 1.6 和 D6。
+  由 `slang.dll` 在运行时 `LoadLibrary` 加载 —— **CMake 看不见这条依赖**。→ 步骤 1.6 / D6。
 - **F3 · 实测最小 DLL 集（Debug）就三个**：`SDL3d.dll` + `slang.dll` + `slang-compiler.dll`。
-  在 clean PATH 的空目录里放这三个，`arti_player --help` 退出码 0；跑真实项目能起窗口、
-  能把 `gbuffer.slang` 编译成 SPIR-V、能建 G-Buffer 管线。
   **`slang-glslang*.dll` / `slang-rt*.dll` / `slang-glsl-module*.dll` 都不需要** ——
   SPIR-V 直出不过 glslang。别多拷（那三个加起来 30 MB+）。
-- **F4 · 复现方式**：原 PATH 只摘掉 `C:\VulkanSDK\1.4.335.0\Bin`，当前 `arti_player.exe`
-  立刻 `0xC0000135`（STATUS_DLL_NOT_FOUND）。不需要清空整个 PATH 就能复现。
-- **F5 · Debug 构建不可发布。** `ucrtbased.dll` / `MSVCP140D.dll` / `VCRUNTIME140D.dll` 在**本机**
-  的 System32 里（装了 VS 调试运行库），所以 clean PATH 测试能过；但它们不可再分发。
-  真要给别人跑必须 Release。→ 端到端验收里补了 Release 一条。
-- **F6 · 本机 CMake 4.2.1**，`copy_directory_if_different` 可用，2.3 的「坑 3」在本机不适用
-  （但仓库声明的下限仍是 3.25，保留那条提醒）。
+- **F4 · 复现方式**：原 PATH 只摘掉 `C:\VulkanSDK\<ver>\Bin`，改动前的 `arti_player.exe`
+  立刻 `0xC0000135`（STATUS_DLL_NOT_FOUND）。不需要清空整个 PATH。
+- **F5 · Debug 构建不可发布**（见上面「遗留」）。
+- **F6 · 本机 CMake 4.2.1**，`copy_directory_if_different` 可用；2.3 里仍然保留了 3.25 的降级
+  分支，因为仓库声明的下限是 3.25。
 
 **踩到的坑**（方法论，给后面的人省时间）：
 
-- PowerShell 里 `& exe ... | Select-Object -First N` 会**提前终止管线**，导致 `$LASTEXITCODE`
-  是假的（我一开始拿到 `0xC0000135`，其实进程是正常退出的）。测退出码要
+- PowerShell 里 `& exe ... | Select-Object -First N` 会**提前终止管线**，`$LASTEXITCODE` 是
+  假的（我一开始拿到 `0xC0000135`，其实进程正常退出了）。测退出码要
   `& exe > out.txt 2> err.txt` 再读 `$LASTEXITCODE`。
 - 判断「缺哪个 DLL」不要靠猜。`llvm-readobj --coff-imports <pe>` 列静态导入表
   （`llvm-readobj` 在 `C:\Program Files\LLVM\bin`）；**动态 `LoadLibrary` 的依赖它看不见**，
   那种只能靠「往空目录里逐个加文件」二分出来（F2 就是这么找到的）。
+- **spdlog 不会立刻落盘。** `Stop-Process -Force` 杀掉进程会丢掉缓冲里的日志，看起来像是
+  「跑到一半卡住了」。要看完整日志得让它干净退出：PowerShell 里 `$p.CloseMainWindow()` +
+  `$p.WaitForExit()`，日志末尾才会出现 `First frame rendered` 和 `ArtiChoco stopped`。
+- **整个源码树改不了名**：工具的 shell 把 cwd 钉在里面，Windows 上会锁住。要让「回落路径失效」
+  就只改名那两个叶子目录（`ArtiRenderer/ArtiRenderer/src/shaders` 和 `Tools/resources`），
+  证明力等价 —— 它们就是两个宏指向的地方。
 
 **决定记录**（时间倒序，新的加在最上面）：
 
+- 2026-09-02 1.4 没写临时代码，改用 2.1 的 shader 根日志验证 `executableDir()` —— 那是产品
+  代码里的真实调用点，比临时代码强，也不用事后删。
+- 2026-09-02 2.3 用 `copy_directory_if_different` 但包了一层 CMake 版本降级分支，而不是只在
+  文档里留一句提醒。
+- 2026-09-02 `PackReport` 多加了 `warnings` —— 「缺播放器只提示不失败」需要一个不影响
+  `succeeded` 的出口，而这个库不该自己决定怎么打日志。
 - 2026-09-02 因 F1 / F2 新增 **D6**（显式 staging slang 卫星 DLL）和步骤 1.5 / 1.6。
 - 2026-09-02 初始决定见「设计决定」D1～D5。
 ---
@@ -464,9 +495,22 @@ D1～D5 全部已定。执行时如果发现某条行不通，**先在交接区�
     缺口表里新增两条：非 Windows 的可搬移性未验、Release 发布未验（Debug CRT 不可分发）。
     `grep -rn "不可搬移" docs/` 已无过期残留。
 
-- [ ] **5.3 提交**
+- [x] **5.3 提交**
   - 见「风险与注意 · submodule 三层提交」。
   - 验收：`git submodule status` 里两个指针都指向新提交，且 `git status` 干净。
+  - 结果：三层都已**本地提交**，由内向外：
+    - ArtiChoco `e8f9006` fix(cmake): 修 slang 的运行时依赖配对，并补上动态加载的 slang-compiler.dll
+    - ArtiRenderer `9265ddc` feat(shader): 着色器路径改成两段查找（含 ArtiChoco 指针）
+    - ArtiEngine `23e66dd` feat(runtime): 构建产物与打包产物可搬移（含 ArtiRenderer 指针）
+    - ArtiEngine `b135d9f` docs: 架构总览与可交接的任务清单
+    `git status` 三个仓库都干净。
+  - **未 push** —— 推送是对外动作，等用户点头。推的顺序必须和提交顺序一致（内 → 外），
+    否则外层会指向一个别人拉不到的内层 commit：
+    ```
+    git -C ArtiRenderer/ArtiChoco push
+    git -C ArtiRenderer push
+    git push
+    ```
 
 ---
 
