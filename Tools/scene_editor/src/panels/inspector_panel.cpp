@@ -1,13 +1,14 @@
 #include "panels/inspector_panel.h"
 
 #include "editor_context.h"
+#include "panels/ui_widgets.h"
 
+#include "artichoco/scene/entity.h"
+#include "artichoco/scene/scene.h"
 #include "scene/component_registration.h"
 #include "scene/component_serialization.h"
 #include "scene/components.h"
 #include "scene/render_scene_extractor.h"
-#include "artichoco/scene/entity.h"
-#include "artichoco/scene/scene.h"
 
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -27,8 +28,6 @@ template<typename Component>
 Component* tryGet(scene::Entity& entity) {
     return entity.hasComponent<Component>() ? &entity.getComponent<Component>() : nullptr;
 }
-
-constexpr std::size_t kUuidTextLength = 16;
 
 // 极窄窗口下向量行内单根轴的拖动框最小宽度，防止宽度算出负数/挤成一团。
 constexpr float kMinAxisWidth = 30.0f;
@@ -56,81 +55,24 @@ std::unordered_map<core::UUID, std::string>& environmentEditorStates() {
     return states;
 }
 
-std::string uuidToText(core::UUID uuid) {
-    return uuid.toString();
-}
+std::string uuidToText(core::UUID uuid) { return uuid.toString(); }
 
-bool parseUuidText(const std::string& text, core::UUID& out) {
-    if (const auto parsed = core::UUID::fromString(text)) {
-        out = *parsed;
-        return true;
-    }
-    return false;
-}
-
-bool drawUuidInput(const char* label, std::string& text, core::UUID& applied) {
-    char buffer[kUuidTextLength + 1]{};
-    std::memcpy(buffer, text.data(), std::min(text.size(), kUuidTextLength));
-
-    if (ImGui::InputText(label, buffer, sizeof(buffer),
-                ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_AutoSelectAll)) {
-        text.assign(buffer);
-    }
-    return parseUuidText(text, applied);
-}
-
-// ---- 属性网格（两列：固定宽标签列 + 拉伸值列，交替行底色） ----
-
-void beginPropertyGrid() {
-    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2{ 6.0f, 3.5f });
-    ImGui::PushStyleColor(ImGuiCol_TableRowBg, ImVec4{ 0.0f, 0.0f, 0.0f, 0.05f });
-    ImGui::PushStyleColor(ImGuiCol_TableRowBgAlt, ImVec4{ 1.0f, 1.0f, 1.0f, 0.02f });
-    ImGui::BeginTable("##property_grid", 2,
-            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingFixedFit);
-    ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, 110.0f);
-    ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
-}
-
-void endPropertyGrid() {
-    ImGui::EndTable();
-    ImGui::PopStyleColor(2);
-    ImGui::PopStyleVar();
-}
-
-void propertyRow(const char* label, const char* tooltip = nullptr) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    if (tooltip != nullptr) {
-        ImGui::SetItemTooltip("%s", tooltip);
-    }
-    ImGui::TableSetColumnIndex(1);
-}
-
-void drawBoolRow(const char* label, bool* value, const char* tooltip = nullptr) {
-    propertyRow(label, tooltip);
-    ImGui::Checkbox("##value", value);
-}
-
-void drawFloatRow(const char* label, float* value, float speed, float min, float max,
-        const char* format = "%.3f", const char* tooltip = nullptr) {
-    propertyRow(label, tooltip);
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-    ImGui::DragFloat("##value", value, speed, min, max, format);
-}
+// ---- 属性网格里带 glm 的行（网格本身和通用行在 panels/ui_widgets.h）----
 
 void drawColorRow(const char* label, glm::vec3& color, const char* tooltip = nullptr) {
     propertyRow(label, tooltip);
+    // 和 drawFloatRow 同理：固定的 "##color" 在一个网格里出现两次就是同一个 ID。
+    ImGui::PushID(label);
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
     ImGui::ColorEdit3("##color", glm::value_ptr(color),
             ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_InputRGB |
-            ImGuiColorEditFlags_NoDragDrop | ImGuiColorEditFlags_NoTooltip);
+                    ImGuiColorEditFlags_NoDragDrop | ImGuiColorEditFlags_NoTooltip);
+    ImGui::PopID();
 }
 
 // Unity 风格向量控件：彩色 X/Y/Z 轴字母 + 拖动框，右键标签弹 Reset。
-void drawVec3Control(const char* label, glm::vec3& value, const glm::vec3& reset_value,
-        float speed, const char* format = "%.3f") {
+void drawVec3Control(const char* label, glm::vec3& value, const glm::vec3& reset_value, float speed,
+        const char* format = "%.3f") {
     propertyRow(label);
 
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
@@ -176,16 +118,6 @@ void drawVec3Control(const char* label, glm::vec3& value, const glm::vec3& reset
     }
 }
 
-// 整宽暗色按钮，用于 "+ Add Component" / "+ Add Material"。
-bool fullWidthDimButton(const char* label) {
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.16f, 0.16f, 0.17f, 0.60f });
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.92f, 0.45f, 0.11f, 0.22f });
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.92f, 0.45f, 0.11f, 0.40f });
-    const bool clicked = ImGui::Button(label, ImVec2{ -1.0f, 0.0f });
-    ImGui::PopStyleColor(3);
-    return clicked;
-}
-
 // ---- 组件头部（通用） ----
 // CollapsingHeader + 右键 Remove 菜单。
 // 返回 false 表示节已关闭或组件已被删除（调用方应跳过正文）。
@@ -193,16 +125,7 @@ bool fullWidthDimButton(const char* label) {
 template<typename Component, bool Removable = true>
 bool drawComponentHeader(scene::Entity& entity, const char* label, bool default_open = true,
         const char* tooltip = nullptr) {
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
-    if (default_open) {
-        flags |= ImGuiTreeNodeFlags_DefaultOpen;
-    }
-
-    // 悬停时给头部一点主题色底，暗示可交互。
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{ 0.92f, 0.45f, 0.11f, 0.12f });
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4{ 0.92f, 0.45f, 0.11f, 0.22f });
-    const bool open = ImGui::CollapsingHeader(label, flags);
-    ImGui::PopStyleColor(2);
+    const bool open = beginSection(label, default_open);
     const bool hovered = ImGui::IsItemHovered();
 
     if (hovered && tooltip != nullptr) {
@@ -259,21 +182,18 @@ void drawAddComponentUI(scene::Entity& entity) {
     }
 }
 
-void drawEmptyState(const char* message) {
-    const ImVec2 window_size = ImGui::GetWindowSize();
-    const ImVec2 text_size = ImGui::CalcTextSize(message);
-    ImGui::SetCursorPos(ImVec2{ (window_size.x - text_size.x) * 0.5f,
-        (window_size.y - text_size.y) * 0.5f });
-    ImGui::TextDisabled("%s", message);
-}
-
 } // namespace
 
 InspectorPanel::InspectorPanel(EditorContext& context)
         : m_context(context) {}
 
 void InspectorPanel::draw() {
-    ImGui::Begin("Inspector");
+    // 窗口被折叠或裁掉时 Begin 返回 false，此时 SkipItems 为真：BeginTable 会失败，
+    // 而 propertyRow 里的 TableNextRow 会解引用空表指针。所以这里必须提前收工。
+    if (!ImGui::Begin("Inspector")) {
+        ImGui::End();
+        return;
+    }
 
     const auto& selected_entity = m_context.selectedEntity();
     if (!selected_entity) {
@@ -402,7 +322,7 @@ void InspectorPanel::drawMeshRendererComponent(scene::Entity& entity) {
     if (mesh_renderer->materials.size() != state.materials_applied.size()) {
         state.material_texts.clear();
         state.materials_applied.clear();
-        for (const auto& material : mesh_renderer->materials) {
+        for (const auto& material: mesh_renderer->materials) {
             state.material_texts.push_back(uuidToText(material.id()));
             state.materials_applied.push_back(material.id());
         }
@@ -427,11 +347,12 @@ void InspectorPanel::drawMeshRendererComponent(scene::Entity& entity) {
         propertyRow("Material");
         ImGui::PushID(static_cast<int>(i));
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - remove_width);
-        const bool material_valid =
-                drawUuidInput("##material_uuid", state.material_texts[i], state.materials_applied[i]);
+        const bool material_valid = drawUuidInput("##material_uuid", state.material_texts[i],
+                state.materials_applied[i]);
         if (material_valid && i < mesh_renderer->materials.size()) {
-            mesh_renderer->materials[i] =
-                    arti::asset::AssetHandle<engine::asset::MaterialAsset>{ state.materials_applied[i] };
+            mesh_renderer->materials[i] = arti::asset::AssetHandle<engine::asset::MaterialAsset>{
+                state.materials_applied[i]
+            };
         }
         ImGui::SameLine();
         if (ImGui::Button("Remove")) {

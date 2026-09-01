@@ -15,7 +15,12 @@ HierarchyPanel::HierarchyPanel(EditorContext& context)
 void HierarchyPanel::draw() {
     auto& scene = m_context.scene();
 
-    ImGui::Begin("Hierarchy");
+    // 窗口被折叠或裁掉时 Begin 返回 false，此时窗口的 SkipItems 为真，后面画什么都进不去，
+    // 白白遍历一遍场景。删除请求下一次可见时再处理，不会丢。
+    if (!ImGui::Begin("Hierarchy")) {
+        ImGui::End();
+        return;
+    }
 
     if (ImGui::BeginPopupContextWindow(nullptr,
                 ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
