@@ -1,6 +1,7 @@
 #include "scene_document.h"
 
 #include "editor_context.h"
+#include "editor_paths.h"
 #include "editor_project.h"
 
 #include "platform/common/file_dialogs.h"
@@ -8,18 +9,15 @@
 #include "asset/builtin_assets.h"
 #include "asset/material_asset.h"
 #include "asset/mesh_asset.h"
-#include "scene/component_registration.h"
 #include "scene/components.h"
 
 #include "artichoco/core/application.h"
 #include "artichoco/project/project_manager.h"
 #include "artichoco/scene/entity.h"
 #include "artichoco/scene/scene.h"
-#include "artichoco/scene/scene_serializer.h"
 
 #include <glm/gtc/quaternion.hpp>
 
-#include <exception>
 #include <string>
 #include <system_error>
 
@@ -38,18 +36,15 @@ std::string projectRoot(EditorContext& context) {
 
 } // namespace
 
+// 组件的拷贝表和序列化表由 engine::World 在构造时注册，这里不用管。
 SceneDocument::SceneDocument(EditorContext& context)
-        : m_context(&context) {
-    m_serialization = std::make_unique<scene::SceneSerializationRegistry>();
-    engine::registerSceneComponents(m_serialization.get());
-    m_serializer = std::make_unique<scene::SceneSerializer>(*m_serialization);
-}
+        : m_context(&context) {}
 
 SceneDocument::~SceneDocument() = default;
 
 void SceneDocument::reset() {
     m_context->exitPlayMode();
-    m_context->scene().clearEntities();
+    m_context->world().clear();
     m_context->clearSelection();
     m_file.clear();
     m_dirty = false;
@@ -72,11 +67,8 @@ void SceneDocument::open() {
 }
 
 bool SceneDocument::load(const std::filesystem::path& path) {
-    try {
-        m_serializer->load(path, m_context->scene());
-    } catch (const std::exception& exception) {
-        log().error("Failed to load the scene '{}': {}", path.string(), exception.what());
-        m_context->scene().clearEntities();
+    // 读失败时 World 会把场景清空并记下原因，这里只负责别留下一个指向没读进来的文件的文件名。
+    if (!m_context->world().loadScene(path)) {
         m_file.clear();
         return false;
     }
@@ -109,10 +101,7 @@ bool SceneDocument::saveAs() {
 }
 
 bool SceneDocument::write(std::filesystem::path path) {
-    try {
-        m_serializer->save(m_context->scene(), path);
-    } catch (const std::exception& exception) {
-        log().error("Failed to save the scene '{}': {}", path.string(), exception.what());
+    if (!m_context->world().saveScene(path)) {
         return false;
     }
 
@@ -123,30 +112,20 @@ bool SceneDocument::write(std::filesystem::path path) {
 }
 
 void SceneDocument::rememberInProject(const std::filesystem::path& path) const {
-    // ProjectInfo::last_open_scene 是相对项目根的
     auto& projects = project::ProjectManager::instance();
     const auto& info = projects.getProjectInfo();
     if (!info) {
         return;
     }
-    const auto root = projects.getProjectRootPath();
-    if (!root) {
-        return;
-    }
-
-    std::error_code error;
-    const auto relative = std::filesystem::relative(path, *root, error);
-    if (error || relative.empty()) {
-        return;
-    }
-    // 场景存在项目外面时 relative 会带 ..，那种路径 ProjectManager 会拒，所以只在
-    // 确实位于项目内时才记。
-    if (relative.generic_string().find("..") != std::string::npos) {
+    // 场景存在项目外面时记不进项目文件（见 relativeToProjectRoot）—— 不是错误，
+    // 只是下次打开项目回不到它。
+    const auto relative = relativeToProjectRoot(path);
+    if (!relative) {
         return;
     }
 
     project::ProjectInfo updated = *info;
-    updated.last_open_scene = relative;
+    updated.last_open_scene = *relative;
     projects.setProjectInfo(updated);
     projects.saveProject();
 }

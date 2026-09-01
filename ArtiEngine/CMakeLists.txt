@@ -16,6 +16,7 @@ add_library(artiengine STATIC
     asset/mesh_asset.cpp
     asset/prefab_asset.cpp
     asset/texture_asset.cpp
+    engine_log.cpp
     scene/component_registration.cpp
     scene/component_serialization.cpp
     scene/render_scene_extractor.cpp
@@ -44,6 +45,30 @@ target_link_libraries(artiengine
 )
 
 set_target_properties(artiengine PROPERTIES FOLDER "ArtiEngine")
+
+# Runtime 层：场景 + 系统 tick + 一帧提交。编辑器的 Play 模式和独立 player 消费的是同一份，
+# 否则「编辑器里 Play 的效果」和「exe 跑出来的效果」会各自漂移。
+#
+# 和 Engine 分开而不是并进去：Engine 是引擎的数据模型（资产、组件、抽取），Runtime 是驱动它
+# 的循环。两者外部依赖完全一样，分开纯粹是为了让分层在链接关系上看得见 —— 以后 Runtime 要加
+# 依赖（脚本 VM、物理）不必让所有消费 Engine 数据类型的目标跟着背。
+add_library(artiengine_runtime STATIC
+    runtime/asset_runtime.cpp
+    runtime/scene_renderer.cpp
+    runtime/world.cpp
+)
+add_library(ArtiEngine::Runtime ALIAS artiengine_runtime)
+
+target_compile_features(artiengine_runtime PUBLIC cxx_std_20)
+
+target_link_libraries(artiengine_runtime
+    PUBLIC
+        # 公开头里有 RenderSceneExtractor（值成员）和 rendering:: 的类型，Engine 已经
+        # PUBLIC 带上了 ArtiChoco::{Core,Scene,Asset} 和 ArtiRenderer::Renderer。
+        ArtiEngine::Engine
+)
+
+set_target_properties(artiengine_runtime PROPERTIES FOLDER "ArtiEngine")
 
 # ImGui 宿主单独一个 target：它要链 SDL 和 imgui 的 SDL3 后端，不该让核心库的下游都背上。
 # ArtiRenderer 不链 Platform/SDL，所以这部分只能待在引擎层。

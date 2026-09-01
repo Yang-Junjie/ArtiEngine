@@ -1,6 +1,7 @@
 #pragma once
 
 #include "artichoco/asset/asset_manager.h"
+#include "runtime/asset_runtime.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -50,6 +51,10 @@ struct SourceSettings {
 
 // CPU-side asset workspace shared by editor frontends and command-line tools.
 // Renderer-owned GPU caches deliberately remain outside this class.
+//
+// 建立在 engine::AssetRuntime 之上：那边是运行时也需要的部分（loader + builtin），这边加上
+// 只有编辑期需要的 importer、reconcile 和按源文件分组。loader 的注册因此只有一处，
+// 加了新资产类型不会出现「编辑器认得、player 不认得」。
 class AssetPipeline {
 public:
     AssetPipeline() = default;
@@ -111,7 +116,7 @@ public:
 private:
     void invalidateCacheIfStale() const;
 
-    std::unique_ptr<arti::asset::AssetManager> m_manager;
+    engine::AssetRuntime m_runtime;
     std::filesystem::path m_assets_root;
 
     // source_path → 归属它的资产。整表按 catalog revision 重建，查询 O(1)。

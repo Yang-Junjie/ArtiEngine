@@ -1,0 +1,77 @@
+#include "runtime/world.h"
+
+#include "engine_log.h"
+#include "scene/component_registration.h"
+
+#include "artichoco/scene/scene.h"
+#include "artichoco/scene/scene_serializer.h"
+#include "artichoco/scene/system.h"
+
+#include <exception>
+
+namespace arti::engine {
+
+World::World()
+        : m_scene(std::make_unique<scene::Scene>()),
+          m_serialization(std::make_unique<scene::SceneSerializationRegistry>()) {
+    registerSceneComponents(m_serialization.get());
+    m_serializer = std::make_unique<scene::SceneSerializer>(*m_serialization);
+}
+
+World::~World() = default;
+
+scene::Scene& World::scene() noexcept { return *m_scene; }
+
+const scene::Scene& World::scene() const noexcept { return *m_scene; }
+
+bool World::loadScene(const std::filesystem::path& path) {
+    try {
+        m_serializer->load(path, *m_scene);
+    } catch (const std::exception& exception) {
+        getLogChannel().error("Failed to load the scene '{}': {}", path.string(), exception.what());
+        m_scene->clearEntities();
+        resetClock();
+        return false;
+    }
+
+    resetClock();
+    getLogChannel().info("Loaded the scene '{}'", path.string());
+    return true;
+}
+
+bool World::saveScene(const std::filesystem::path& path) const {
+    try {
+        m_serializer->save(*m_scene, path);
+    } catch (const std::exception& exception) {
+        getLogChannel().error("Failed to save the scene '{}': {}", path.string(), exception.what());
+        return false;
+    }
+    return true;
+}
+
+void World::clear() {
+    m_scene->clearEntities();
+    resetClock();
+}
+
+void World::tick(float delta_time) {
+    scene::UpdateContext context;
+    context.deltaTime = delta_time;
+    context.fixedDeltaTime = m_fixed_accumulator.fixedDeltaTime();
+    context.frameIndex = m_frame_index++;
+
+    m_fixed_accumulator.tick(delta_time, [this, &context](float fixed_delta) {
+        context.fixedDeltaTime = fixed_delta;
+        m_scene->runSystems(scene::SystemStage::FixedUpdate, context);
+    });
+
+    m_scene->runSystems(scene::SystemStage::Update, context);
+    m_scene->runSystems(scene::SystemStage::LateUpdate, context);
+}
+
+void World::resetClock() noexcept {
+    m_fixed_accumulator = core::FixedTimestepAccumulator{};
+    m_frame_index = 0;
+}
+
+} // namespace arti::engine

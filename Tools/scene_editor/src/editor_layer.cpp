@@ -9,6 +9,7 @@
 #include "panels/content_browser_panel.h"
 #include "panels/hierarchy_panel.h"
 #include "panels/inspector_panel.h"
+#include "panels/project_settings_panel.h"
 #include "panels/viewport_panel.h"
 
 #include "platform/common/file_dialogs.h"
@@ -19,8 +20,8 @@
 #include "asset/mesh_asset.h"
 #include "asset/prefab_asset.h"
 #include "imgui/imgui_host.h"
+#include "runtime/scene_renderer.h"
 #include "scene/components.h"
-#include "scene/render_scene_extractor.h"
 
 #include "artichoco/core/application.h"
 #include "artichoco/platform/window/sdl_vulkan_surface_source.h"
@@ -69,7 +70,7 @@ void EditorLayer::onAttach() {
     renderer_info.present = rendering::PresentMode::IntoUI;
     m_renderer = std::make_unique<rendering::Renderer>(*m_render_device, renderer_info);
 
-    m_extractor = std::make_unique<engine::RenderSceneExtractor>();
+    m_scene_renderer = std::make_unique<engine::SceneRenderer>(*m_renderer);
     m_editor_camera = std::make_unique<EditorCamera>();
     m_gizmo = std::make_unique<EditorGizmo>();
 
@@ -88,6 +89,7 @@ void EditorLayer::onAttach() {
     m_inspector_panel = std::make_unique<InspectorPanel>(*m_context);
     m_viewport_panel = std::make_unique<ViewportPanel>(*m_renderer);
     m_content_browser_panel = std::make_unique<ContentBrowserPanel>(*m_project);
+    m_project_settings_panel = std::make_unique<ProjectSettingsPanel>(*m_document);
 
     const auto output = m_renderer->outputInfo();
     app.getLogChannel().info("Scene Editor ready, output {}x{}", output.width, output.height);
@@ -97,6 +99,8 @@ void EditorLayer::onDetach() {
     if (m_renderer) {
         m_renderer->waitIdle();
     }
+    // 设置对话框引用 document，先于它析构。
+    m_project_settings_panel.reset();
     m_viewport_panel.reset();
     m_inspector_panel.reset();
     m_hierarchy_panel.reset();
@@ -104,7 +108,7 @@ void EditorLayer::onDetach() {
     m_imgui.reset();
     m_gizmo.reset();
     m_editor_camera.reset();
-    m_extractor.reset();
+    m_scene_renderer.reset();
     // 顺序：document 引用 context，context 引用 project。
     m_document.reset();
     m_context.reset();
@@ -147,14 +151,16 @@ void EditorLayer::onImGuiRender() {
     m_hierarchy_panel->draw();
     m_inspector_panel->draw();
     m_content_browser_panel->draw();
+    // 模态：菜单项只置个标记，真正的 OpenPopup 在这里，和 BeginPopupModal 同一层 ID 栈。
+    m_project_settings_panel->draw();
 
     const auto selected = m_context->selectedEntity();
     const auto [width, height] = m_viewport_panel->draw([&](const ViewportPanel::ImageRect& rect) {
         if (!gizmo_enabled) {
             return;
         }
-        m_gizmo->draw(m_context->scene(), selected, m_extractor->renderScene().view, rect.x, rect.y,
-                rect.width, rect.height);
+        m_gizmo->draw(m_context->scene(), selected, m_scene_renderer->renderScene().view,
+                rect.x, rect.y, rect.width, rect.height);
     });
     handleViewportAssetDrop(m_viewport_panel->imageRect().x, m_viewport_panel->imageRect().y,
             m_viewport_panel->imageRect().width, m_viewport_panel->imageRect().height);
@@ -169,55 +175,45 @@ void EditorLayer::onImGuiRender() {
 }
 
 void EditorLayer::onRender() {
-    if (!m_renderer) {
+    // SceneRenderer::submit() 是**唯一**提交 ImGui draw data 的地方（onImGuiRender 只生成，
+    // 不提交）。所以这个函数必须无条件走到它 —— 任何 early return 都是整个界面黑屏，
+    // 而黑屏时用户连菜单都点不到，没法自救。
+    //
+    // 下面这道守卫是安全的：这三个都是 onAttach 里和 m_imgui 一起建起来的，
+    // 它们不在的时候也没有 UI 可丢。
+    if (!m_renderer || !m_scene_renderer || !m_context) {
         return;
     }
 
-    // renderFrame 是**唯一**提交 ImGui draw data 的地方（onImGuiRender 只生成，不提交）。
-    // 所以这个函数必须无条件走到它 —— 任何 early return 都是整个界面黑屏，
-    // 而黑屏时用户连菜单都点不到，没法自救。
-    //
-    // 场景画不出来的情况（没开项目、面板尺寸为 0、Play 模式没相机）就提交一个空场景：
-    // 没有 draw、只有 UI 覆盖层。IntoUI 模式下 ImGuiPass 会清 backbuffer，所以界面正常。
-    m_renderer->setSceneTargetSize(m_viewport_width, m_viewport_height);
-
-    const bool can_extract = m_context && m_context->isProjectOpen() && m_viewport_width != 0 &&
-                             m_viewport_height != 0;
-
-    const rendering::RenderScene* submit = nullptr;
-    rendering::RenderScene empty;
-
-    if (can_extract) {
-        engine::ExtractTarget target;
-        target.width = m_viewport_width;
-        target.height = m_viewport_height;
-        submit = &m_extractor->extract(m_context->scene(), m_project->gpuAssets(), *m_renderer,
-                target);
-
-        if (!m_context->isPlaying()) {
-            m_extractor->overrideView(
-                    m_editor_camera->buildRenderView(m_viewport_width, m_viewport_height));
-        } else if (!m_extractor->hasCamera()) {
-            // Play 模式但场景里没有 primary 相机：不画场景，但 UI 要留着 ——
-            // 否则用户按不到 Stop。toolbar 上那行红字说明原因。
-            submit = &empty;
-        }
-    } else {
-        submit = &empty;
+    engine::SceneRenderer::ViewportInfo viewport;
+    viewport.width = m_viewport_width;
+    viewport.height = m_viewport_height;
+    // 编辑模式下相机是编辑器的，不是场景里的 —— 盖掉场景里的 primary 相机。
+    // 尺寸为 0 时不算：宽高比会变成 0/0。
+    if (!m_context->isPlaying() && m_viewport_width != 0 && m_viewport_height != 0) {
+        viewport.view_override =
+                m_editor_camera->buildRenderView(m_viewport_width, m_viewport_height);
     }
 
-    // 调试线必须在 renderFrame **之前**提交：它们只作用于紧接着的那一帧，和 requestPick 一样。
-    // 放在 extract 之后是因为要用相机（编辑器相机的 override 也已经生效了）。
-    if (can_extract && !m_context->isPlaying()) {
+    // 没开项目就不给资产。场景画不出来的几种情况（没开项目、面板尺寸为 0、Play 模式没相机）
+    // 由 SceneRenderer 统一处理成提交一个空场景：没有 draw、只有 UI 覆盖层。
+    // IntoUI 模式下 ImGuiPass 会清 backbuffer，所以界面正常。
+    engine::asset::GPUAssetCache* assets =
+            m_context->isProjectOpen() ? &m_project->gpuAssets() : nullptr;
+    const bool has_scene = m_scene_renderer->prepare(m_context->scene(), assets, viewport);
+
+    // 调试线必须在 submit **之前**提交：它们只作用于紧接着的那一帧，和 requestPick 一样。
+    // 放在 prepare 之后是因为要用相机（编辑器相机的覆盖也已经生效了）。
+    if (has_scene && !m_context->isPlaying()) {
         submitSelectionGizmos();
     }
 
-    const auto statistics = m_renderer->renderFrame(*submit,
-            m_imgui ? m_imgui->overlay() : rendering::FrameOverlay{});
+    const auto statistics =
+            m_scene_renderer->submit(m_imgui ? m_imgui->overlay() : rendering::FrameOverlay{});
     m_last_statistics = statistics;
 
     if (const auto pick = m_renderer->takePickResult()) {
-        const auto entity = m_extractor->entityForPickingId(pick->picking_id);
+        const auto entity = m_scene_renderer->entityForPickingId(pick->picking_id);
         m_context->setSelectedEntity(entity);
     }
 
@@ -282,6 +278,10 @@ void EditorLayer::drawMenuBar() {
                 m_document->saveAs();
             }
             ImGui::Separator();
+            if (ImGui::MenuItem("Project Settings...", nullptr, false, project_open)) {
+                m_project_settings_panel->open();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Exit")) {
                 core::Application::get().close();
             }
@@ -330,7 +330,7 @@ void EditorLayer::drawToolbar() {
 
     ImGui::SameLine();
     ImGui::Text("| %.1f FPS | %u draws", ImGui::GetIO().Framerate, m_last_statistics.draw_calls);
-    if (playing && !m_extractor->hasCamera()) {
+    if (playing && !m_scene_renderer->hasCamera()) {
         ImGui::SameLine();
         ImGui::TextColored(ImVec4{ 1.0f, 0.4f, 0.3f, 1.0f },
                 "| no primary camera — nothing to render");

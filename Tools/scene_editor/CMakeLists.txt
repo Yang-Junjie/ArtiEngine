@@ -9,6 +9,7 @@ add_executable(scene_editor
     src/panels/content_browser_panel.cpp
     src/panels/hierarchy_panel.cpp
     src/panels/inspector_panel.cpp
+    src/panels/project_settings_panel.cpp
     src/panels/viewport_panel.cpp
 )
 
@@ -27,6 +28,8 @@ target_compile_definitions(scene_editor PRIVATE
 target_link_libraries(scene_editor
     PRIVATE
         ArtiEngine::Engine
+        # World / SceneRenderer —— 和独立 player 消费的是同一份。
+        ArtiEngine::Runtime
         ArtiEngine::ImGui
         ArtiTools::Asset
         # 原生文件对话框。工具专用,所以在 Tools/platform 而不是 ArtiChoco::Platform。

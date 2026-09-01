@@ -48,6 +48,9 @@ add_subdirectory(third_party)
 
 add_subdirectory(ArtiEngine)
 
+# 独立播放器。放在 ArtiEngine 之后：它链 ArtiEngine::Runtime。
+add_subdirectory(Runtime)
+
 option(ARTIENGINE_BUILD_TOOLS "Build ArtiEngine tools (editors, etc.)" ON)
 if(ARTIENGINE_BUILD_TOOLS)
     add_subdirectory(Tools)

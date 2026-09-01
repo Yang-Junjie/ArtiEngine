@@ -1,18 +1,13 @@
 #pragma once
 #include <filesystem>
-#include <memory>
-
-namespace arti::scene {
-class SceneSerializationRegistry;
-class SceneSerializer;
-} // namespace arti::scene
 
 namespace arti::editor {
 
 class EditorContext;
 
 // 编辑器正在编辑的场景「文档」：新建、存、读，以及和 ProjectInfo::last_open_scene 的同步。
-// 场景本身在 EditorContext 里 —— 这里只管它和磁盘之间的那条路。
+// 场景和读写它的 serializer 都在 engine::World 里 —— 这里只管「哪个文件」这件编辑器专属的事：
+// 文件对话框、当前文件名、脏标记、以及记住上次打开的场景。
 //
 // 所有换场景的入口都从 reset() 走，那里会退出 Play 模式并清掉选中的实体：
 // 快照和选中 ID 指的是马上要被清掉的实体，留着就是悬空引用。
@@ -64,10 +59,6 @@ private:
     void rememberInProject(const std::filesystem::path& path) const;
 
     EditorContext* m_context{ nullptr };
-
-    // 序列化表和 serializer。表不是进程级的（是个对象），所以编辑器自己持有一份。
-    std::unique_ptr<scene::SceneSerializationRegistry> m_serialization;
-    std::unique_ptr<scene::SceneSerializer> m_serializer;
 
     std::filesystem::path m_file;
     bool m_dirty{ false };

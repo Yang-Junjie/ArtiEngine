@@ -15,7 +15,7 @@ class Renderer;
 
 namespace arti::engine {
 class ImGuiHost;
-class RenderSceneExtractor;
+class SceneRenderer;
 } // namespace arti::engine
 
 namespace arti::editor {
@@ -27,6 +27,7 @@ class EditorProject;
 class ContentBrowserPanel;
 class HierarchyPanel;
 class InspectorPanel;
+class ProjectSettingsPanel;
 class SceneDocument;
 class ViewportPanel;
 
@@ -57,7 +58,7 @@ private:
     std::unique_ptr<renderer::RenderDevice> m_render_device;
     std::unique_ptr<rendering::Renderer> m_renderer;
     std::unique_ptr<engine::ImGuiHost> m_imgui;
-    std::unique_ptr<engine::RenderSceneExtractor> m_extractor;
+    std::unique_ptr<engine::SceneRenderer> m_scene_renderer;
 
     std::unique_ptr<EditorProject> m_project;
     std::unique_ptr<EditorContext> m_context;
@@ -67,6 +68,7 @@ private:
     std::unique_ptr<ContentBrowserPanel> m_content_browser_panel;
     std::unique_ptr<HierarchyPanel> m_hierarchy_panel;
     std::unique_ptr<InspectorPanel> m_inspector_panel;
+    std::unique_ptr<ProjectSettingsPanel> m_project_settings_panel;
     std::unique_ptr<ViewportPanel> m_viewport_panel;
 
     uint32_t m_frame_index{ 0 };

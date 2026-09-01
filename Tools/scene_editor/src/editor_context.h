@@ -1,4 +1,6 @@
 #pragma once
+#include "runtime/world.h"
+
 #include "artichoco/core/uuid.h"
 
 #include <memory>
@@ -22,11 +24,16 @@ public:
     EditorContext(const EditorContext&) = delete;
     EditorContext& operator=(const EditorContext&) = delete;
 
-    scene::Scene& scene() noexcept { return *m_scene; }
-    const scene::Scene& scene() const noexcept { return *m_scene; }
+    // 编辑器正在编辑的世界。Play 模式跑的就是它 —— 和独立 player 跑的是同一个 engine::World，
+    // 所以「编辑器里 Play 的效果」和「exe 跑出来的效果」不会各自漂移。
+    engine::World& world() noexcept { return *m_world; }
+    const engine::World& world() const noexcept { return *m_world; }
+
+    scene::Scene& scene() noexcept { return m_world->scene(); }
+    const scene::Scene& scene() const noexcept { return m_world->scene(); }
 
     EditorProject& project() noexcept { return *m_project; }
-    
+
     bool isProjectOpen() const noexcept;
 
     const std::optional<core::UUID>& selectedEntity() const noexcept { return m_selected_entity; }
@@ -43,15 +50,14 @@ public:
     // 回 Edit：从快照恢复场景。重复调用是空操作
     void exitPlayMode();
 
-    // 跑一帧 Play 模式的系统（FixedUpdate 补齐后 Update / LateUpdate）。
-    // 累加器和帧号都是这一次 Play 会话的状态，由 enterPlayMode 归零，所以留在这里。
+    // 跑一帧 Play 模式的系统。计时状态在 World 里 —— 那是运行时的一部分，不是编辑器的。
     void updatePlay(float delta_time);
 
 private:
     struct State;
 
     EditorProject* m_project{ nullptr };
-    std::unique_ptr<scene::Scene> m_scene;
+    std::unique_ptr<engine::World> m_world;
     std::unique_ptr<State> m_state;
     std::optional<core::UUID> m_selected_entity;
     Mode m_mode{ Mode::Edit };

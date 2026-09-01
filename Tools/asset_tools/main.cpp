@@ -1,3 +1,4 @@
+#include "asset_tools/asset_packer.h"
 #include "asset_tools/asset_pipeline.h"
 
 #include "artichoco/core/log.h"
@@ -18,7 +19,9 @@ void printUsage() {
               << "  asset_tools validate <project.artiproj>\n"
               << "  asset_tools settings <project.artiproj> <source>\n"
               << "  asset_tools set     <project.artiproj> <source> <key> <value|->\n"
-              << "  asset_tools extract <project.artiproj> <material-uuid> [destination]\n";
+              << "  asset_tools extract <project.artiproj> <material-uuid> [destination]\n"
+              << "  asset_tools pack    <project.artiproj> <output-dir> "
+                 "[--overwrite] [--no-reconcile]\n";
 }
 
 std::string_view layerName(arti::asset::SettingLayer layer) {
@@ -106,19 +109,27 @@ int run(int argc, char** argv) {
     }
 
     const std::string_view command{ argv[1] };
-    const int expected = command == "extract" ? (argc == 5 ? 5 : 4)
-            : command == "import" || command == "settings" ? 4
-            : command == "set"                                       ? 6
-                                                                     : 3;
-    if (argc != expected) {
+    if (command != "import" && command != "plan" && command != "scan" && command != "list" &&
+            command != "validate" && command != "settings" && command != "set" &&
+            command != "extract" && command != "pack") {
         printUsage();
         return 2;
     }
-    if (command != "import" && command != "plan" && command != "scan" && command != "list" &&
-            command != "validate" && command != "settings" && command != "set" &&
-            command != "extract") {
-        printUsage();
-        return 2;
+    // pack 的参数是变长的（输出目录之后还能跟开关），所以不走下面那套固定个数的校验。
+    if (command == "pack") {
+        if (argc < 4) {
+            printUsage();
+            return 2;
+        }
+    } else {
+        const int expected = command == "extract" ? (argc == 5 ? 5 : 4)
+                : command == "import" || command == "settings" ? 4
+                : command == "set"                                       ? 6
+                                                                         : 3;
+        if (argc != expected) {
+            printUsage();
+            return 2;
+        }
     }
 
     auto& projects = arti::project::ProjectManager::instance();
@@ -137,6 +148,38 @@ int run(int argc, char** argv) {
     if (!pipeline.open(*assets_root, *artifacts_root)) {
         std::cerr << "Failed to open the asset workspace\n";
         return 1;
+    }
+
+    if (command == "pack") {
+        arti::tools::asset::PackOptions options;
+        options.output_dir = std::filesystem::path{ argv[3] };
+        for (int index = 4; index < argc; ++index) {
+            const std::string_view flag{ argv[index] };
+            if (flag == "--overwrite") {
+                options.overwrite = true;
+            } else if (flag == "--no-reconcile") {
+                options.reconcile = false;
+            } else {
+                std::cerr << "Unknown pack option: " << flag << '\n';
+                printUsage();
+                return 2;
+            }
+        }
+
+        const auto report = arti::tools::asset::pack(pipeline, options);
+        for (const auto& error: report.errors) {
+            std::cerr << "error: " << error << '\n';
+        }
+        if (!report.succeeded) {
+            return 1;
+        }
+        std::cout << "Packed " << report.assets << " asset(s), " << report.artifacts_copied
+                  << " artifact(s), " << report.scenes_copied << " scene(s) into "
+                  << report.output_dir.generic_string() << '\n'
+                  << "  " << report.project_file.filename().generic_string() << '\n'
+                  << "  " << report.manifest_file.filename().generic_string() << '\n'
+                  << "Copy arti_player.exe into that directory to run it." << '\n';
+        return 0;
     }
 
     if (command == "import") {
