@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 未开始 |
+| **状态** | 阶段 1 完成，共 7 个阶段 |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiRenderer（主要）、ArtiEngine（光源组件与序列化） |
@@ -14,11 +14,18 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：未开始。阶段 1～7 全部未动。
+**当前进度**：**阶段 1 完成**（1.1～1.4 已勾）。管线接缝走通，画面无变化。
 
-**下一步**：阶段 1.1，新建 `shadow_targets.h`。动手前先读「设计决定」——
-D2（拟合相机视锥而不是场景包围盒）和 D4（texel snapping 是必须项）是这份任务里最容易被
-「顺手简化」掉的两条，它们各自对应一类一眼就能看出来的瑕疵。
+**下一步**：阶段 2.1，给 `RenderView` 加 `near_plane` / `far_plane`。注意 2.2 要**两处都填**
+（`RenderSceneExtractor` 和 `EditorCamera::buildRenderView`），漏一处的后果是「编辑器里阴影对、
+Play 模式里不对」。
+
+**风险已解除一条**：「深度-only framebuffer（0 个颜色附件）能不能建」—— **能**。
+四个 framebuffer 全部建成（`Shadow cascades created: 4 x 2048^2 (revision 1)`），
+Vulkan 校验层无新增报错。**不需要**那张 R8 假颜色附件的退路。
+
+剩下三条风险未验：`Texture2DArray` 走反射绑定路径（阶段 4.1 撞）、ZO 深度与负 viewport 高度下
+shadow map 的 Y 方向（阶段 3.4 撞）、push constant 取整（阶段 3.1）。
 
 **决定记录**（时间倒序，新的加在最上面）：
 
@@ -177,7 +184,7 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
 
 ### 阶段 1 · 管线接缝（半天，不产生任何画面变化）
 
-- [ ] **1.1 新建 `ShadowTargets`**
+- [x] **1.1 新建 `ShadowTargets`**
   - 文件：`ArtiRenderer/ArtiRenderer/src/pipeline/shadow_targets.h`（新建）+ `.cpp`
   - 做法：照 `gbuffer_targets.h` 的形状写：管线拥有、`prepare(device)` 幂等、`revision()`、
     禁拷贝。持一张 `Texture2DArray` 的 D32 和 N 个 framebuffer。头部注释写清 D1 的理由
@@ -186,28 +193,44 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
     —— 阴影图分辨率和场景分辨率无关。这是它和 `GBufferTargets` 的关键区别，别照抄那边的
     `bound_revision` 逻辑。
   - 验收：编译通过。
+  - 结果：`shadow_targets.{h,cpp}` 已建。幂等 prepare（建一次），不跟 `RenderTargetSet` 的 revision 走。
+    常量 `kShadowCascadeCount = 4` / `kShadowMapResolution = 2048` 放在这个头里 —— 它是 array
+    形状的自然拥有者，着色端也要用到级数。
 
-- [ ] **1.2 两个 context 类加第四个共享资源**
+- [x] **1.2 两个 context 类加第四个共享资源**
   - 文件：`pipeline/linear_pass.h`、`linear_pass.cpp`、`linear_pipeline.{h,cpp}`
   - 做法：`PassPrepareContext` / `PassRecordContext` 的构造函数各加一个 `ShadowTargets&`，
     加 `shadows()` 访问器；`LinearPipeline` 持一个成员并在构造两个 context 时传进去，
     `prepare()` 里在 `RenderTargetSet::prepare()` 之后调 `ShadowTargets::prepare()`。
   - 验收：全项目编译通过（所有 pass 都要跟着重编，但没有一个需要改）。
+  - 结果：两个 context 各加了 `ShadowTargets&` 和 `shadows()`，`LinearPipeline` 持成员并在
+    `m_gbuffer.prepare()` 之后调 `m_shadows.prepare()`。所有 pass 跟着重编但**一个都不用改**。
 
-- [ ] **1.3 加 `LinearStage::Shadow`**
+- [x] **1.3 加 `LinearStage::Shadow`**
   - 文件：`pipeline/linear_stage.h`
   - 做法：枚举里插在 `EnvironmentBake` 之后、`Clear` 之前，`linearStageName()` 补一个 case，
     并按那个文件的风格写一段注释说明为什么在这个位置（D11）。
   - 注意：stage 名会进 GPU marker 标签，所以名字定了就别改 —— capture 里看到的东西会跟着变。
   - 验收：编译通过。
+  - 结果：`LinearStage::Shadow` 插在 `EnvironmentBake` 和 `Clear` 之间，`linearStageName()` 补了 case，
+    并按那个文件的风格写了位置理由。
 
-- [ ] **1.4 装一个空的 `ShadowPass`**
+- [x] **1.4 装一个空的 `ShadowPass`**
   - 文件：`pipeline/passes/shadow_pass.{h,cpp}`（新建），`linear_pipeline.cpp` 的
     `createDeferredPipeline()` 里 `addPass(LinearStage::Shadow, …)`
   - 做法：`name()` 返回 `"Shadow"`，`isEnabled()` 先恒 `false`，`prepare` / `record` 空实现。
   - 验收：跑 `scene_editor`，装配日志里那行 stage 链出现 `Shadow`，画面和之前一致，
     Vulkan 校验层无新增报错。
   - 别忘了：`createDeferredPipeline()` 末尾那条 info 日志里的 stage 链字符串要跟着更新。
+  - 结果：`shadow_pass.{h,cpp}` 空壳已装（`isEnabled()` 恒 false），`createDeferredPipeline()` 末尾
+    那条日志的 stage 链已更新。实测：
+    ```
+    Created deferred pipeline (Bake -> Shadow -> Clear -> GBuffer -> Lighting -> Sky ->
+                               Tonemap -> Debug -> Output -> UI)
+    Shadow cascades created: 4 x 2048^2 (revision 1)
+    ```
+    画面与之前一致，无 error，校验层无新增报错（只有原有的两条第三方覆盖层警告），
+    干净退出 exit 0。
 
 ### 阶段 2 · 数据补齐（一两小时，仍然没有画面变化）
 
