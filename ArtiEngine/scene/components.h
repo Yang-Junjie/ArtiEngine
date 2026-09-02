@@ -33,6 +33,12 @@ struct DirectionalLightComponent {
     glm::vec3 color{ 1.0f, 1.0f, 1.0f };
     float intensity{ 1.0f };
     bool enabled{ true };
+
+    // 投不投级联阴影。默认开：现有场景加载后立刻能看到效果，而不是要先去每个灯上打勾。
+    // 目前只有第一个满足条件的方向光真的投影，其余照常照明。
+    bool casts_shadow{ true };
+    // 阴影覆盖到多远（世界单位）。越小越清晰，代价是这个距离之外没有阴影。
+    float shadow_distance{ 100.0f };
 };
 
 // 点光源。位置来自 WorldTransformComponent，所以这里没有 position 字段。

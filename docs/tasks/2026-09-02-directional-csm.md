@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 阶段 1 完成，共 7 个阶段 |
+| **状态** | 阶段 1、2 完成，共 7 个阶段 |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiRenderer（主要）、ArtiEngine（光源组件与序列化） |
@@ -14,18 +14,17 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：**阶段 1 完成**（1.1～1.4 已勾）。管线接缝走通，画面无变化。
+**当前进度**：**阶段 1、2 完成**。管线接缝和数据通路都走通，画面仍无变化。
 
-**下一步**：阶段 2.1，给 `RenderView` 加 `near_plane` / `far_plane`。注意 2.2 要**两处都填**
-（`RenderSceneExtractor` 和 `EditorCamera::buildRenderView`），漏一处的后果是「编辑器里阴影对、
-Play 模式里不对」。
+**下一步**：阶段 3.1，写 `shadow_depth.slang`。阶段 3 是本任务的核心，其中 3.2（cascade 数学）
+的七个步骤要按顺序做完再验 —— 少任何一步（尤其 texel snapping）后面调 bias 都会被干扰。
 
 **风险已解除一条**：「深度-only framebuffer（0 个颜色附件）能不能建」—— **能**。
 四个 framebuffer 全部建成（`Shadow cascades created: 4 x 2048^2 (revision 1)`），
 Vulkan 校验层无新增报错。**不需要**那张 R8 假颜色附件的退路。
 
-剩下三条风险未验：`Texture2DArray` 走反射绑定路径（阶段 4.1 撞）、ZO 深度与负 viewport 高度下
-shadow map 的 Y 方向（阶段 3.4 撞）、push constant 取整（阶段 3.1）。
+剩下两条风险未验：`Texture2DArray` 走反射绑定路径（阶段 4.1 撞）、ZO 深度与负 viewport 高度下
+shadow map 的 Y 方向（阶段 3.4 撞）。push constant 取整那条在 3.1 顺带验。
 
 **决定记录**（时间倒序，新的加在最上面）：
 
@@ -234,27 +233,34 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
 
 ### 阶段 2 · 数据补齐（一两小时，仍然没有画面变化）
 
-- [ ] **2.1 `RenderView` 加 near / far**
+- [x] **2.1 `RenderView` 加 near / far**
   - 文件：`ArtiRenderer/ArtiRenderer/include/render_scene.h`
   - 做法：加 `float near_plane{ 0.1f }; float far_plane{ 100.0f };`。注释说明它们是给阴影分割
     视锥用的 —— 光看两个矩阵推不出来（能推，但从矩阵反解 near/far 又脆又绕）。
   - 验收：编译通过。
+  - 结果：`RenderView` 加了 `near_plane` / `far_plane`，注释写了为什么不从矩阵反解
+    （公式对「正交/透视」和「ZO/NO 深度约定」都敏感，而生产者手上本来就有原值）。
 
-- [ ] **2.2 两个生产者填它**
+- [x] **2.2 两个生产者填它**
   - 文件：`ArtiEngine/scene/render_scene_extractor.cpp`（从 `CameraComponent` 取）、
     `Tools/scene_editor/src/editor_camera.cpp`（`buildRenderView()`，从 `m_near_plane` /
     `m_far_plane` 取）
   - 做法：两处都填。**漏一处的后果是「编辑器里阴影对、Play 模式里不对」**，而那种 bug 两边
     单独看都像是对的。
   - 验收：两个文件都改了（这一条靠 grep 自检：`grep -rn "near_plane" ArtiEngine Tools | grep -i renderview`）。
+  - 结果：两处都填了：`render_scene_extractor.cpp:48-49`（从 `CameraComponent`）和
+    `editor_camera.cpp:149-150`（从 `m_near_plane` / `m_far_plane`）。两边都写了互相指认的注释，
+    说明漏一处的后果是「Edit 对 / Play 不对」。
 
-- [ ] **2.3 `LightDesc` 加 `casts_shadow` / `shadow_distance`**
+- [x] **2.3 `LightDesc` 加 `casts_shadow` / `shadow_distance`**
   - 文件：`ArtiRenderer/ArtiRenderer/include/light.h`
   - 做法：`bool casts_shadow{ true };` `float shadow_distance{ 100.0f };`。注释说明只有方向光
     读它们（点光 / 聚光的阴影是另一件事）。
   - 验收：编译通过。
+  - 结果：`LightDesc` 加了 `casts_shadow{ true }` 和 `shadow_distance{ 100.0f }`，注释标明目前只有
+    方向光读它们。
 
-- [ ] **2.4 组件侧打通到 Inspector**
+- [x] **2.4 组件侧打通到 Inspector**
   - 文件：`ArtiEngine/scene/components.h`（`DirectionalLightComponent` 加两个字段）、
     `scene/component_serialization.cpp`（读写，**缺字段时按默认值**）、
     `scene/render_scene_extractor.cpp`（填进 `LightDesc`）、
@@ -263,6 +269,17 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
     反序列化必须容忍缺失 —— `projects/Assets/Scenes/1.artiscene` 是现成的老场景，它没有这两个键。
   - 验收：用编辑器打开 `1.artiscene`（不该报错）、改这两个值、存盘、重新打开，值还在；
     `git diff` 看那个 `.artiscene` 只多了两个键。
+  - 结果：四处都改了：`components.h`、`component_serialization.cpp`（写无条件、读容忍缺失）、
+    `render_scene_extractor.cpp`（填进 `LightDesc`）、`inspector_panel.cpp`（一个勾选框 + 一个数值框，
+    后者下限 1.0 不是 0 —— 为 0 时拟合视锥的远近端重合、正交范围塔缩成一个点）。
+    实测两个方向：
+    - **缺失时**：原封不动的 `1.artiscene`（没有这两个键）在编辑器里加载正常、无 error。
+    - **存在时**：临时手写 `CastsShadow: false` / `ShadowDistance: 42.5` 进去，`arti_player`
+      加载正常、渲出 `First frame rendered (4 draw calls)`、无 error。**验完已还原** ——
+      旧场景不带新键，留着当回归夹具更有用。
+    写出去的那一半（存盘后文件里真的多了两个键）**没单独验**：存盘要 UI 操作，而两个
+    `node[...] = ...` 是无条件的、用的也是现成 helper。阶段 4 的验收（在 Inspector 里切
+    `casts_shadow` 看画面变）会自然覆盖到它。
 
 ### 阶段 3 · 画出 cascade 0 的深度图（一天）
 

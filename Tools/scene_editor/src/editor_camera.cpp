@@ -144,6 +144,10 @@ rendering::RenderView EditorCamera::buildRenderView(uint32_t width, uint32_t hei
     const float aspect = static_cast<float>(width) / static_cast<float>(height);
     view.projection = glm::perspectiveRH_ZO(glm::radians(m_fov), aspect, m_near_plane, m_far_plane);
     view.camera_position = m_position;
+    // 级联阴影要用它们切视锥。和 RenderSceneExtractor 里的场景相机保持一致 ——
+    // 漏一处的表现是「Edit 模式下阴影对、Play 模式下不对」（或反过来）。
+    view.near_plane = m_near_plane;
+    view.far_plane = m_far_plane;
 
     return view;
 }

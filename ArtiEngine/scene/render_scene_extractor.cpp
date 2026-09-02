@@ -43,6 +43,10 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         m_render_scene.view.projection = glm::perspectiveRH_ZO(glm::radians(camera.fov_degrees),
                 aspect, camera.near_plane, camera.far_plane);
         m_render_scene.view.camera_position = glm::vec3{ world.world[3] };
+        // 级联阴影要按距离切视锥，所以把原值带上 —— 从矩阵反解又脓又绕。
+        // 编辑器相机（EditorCamera::buildRenderView）那边也要填，两处必须一致。
+        m_render_scene.view.near_plane = camera.near_plane;
+        m_render_scene.view.far_plane = camera.far_plane;
         m_has_camera = true;
         break;
     }
@@ -57,6 +61,8 @@ const rendering::RenderScene& RenderSceneExtractor::extract(scene::Scene& scene,
         desc.direction = forwardOf(world.world);
         desc.color = glm::vec4{ light.color, 1.0f };
         desc.intensity = light.intensity;
+        desc.casts_shadow = light.casts_shadow;
+        desc.shadow_distance = light.shadow_distance;
         m_render_scene.lights.push_back(desc);
     }
 

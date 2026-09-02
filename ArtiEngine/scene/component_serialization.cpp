@@ -117,6 +117,8 @@ YAML::Node DirectionalLightSerialization::serialize(
     node["Color"] = writeVector3(component.color);
     node["Intensity"] = component.intensity;
     node["Enabled"] = component.enabled;
+    node["CastsShadow"] = component.casts_shadow;
+    node["ShadowDistance"] = component.shadow_distance;
     return node;
 }
 
@@ -130,6 +132,14 @@ DirectionalLightComponent DirectionalLightSerialization::deserialize(const YAML:
     }
     if (node["Enabled"]) {
         component.enabled = node["Enabled"].as<bool>();
+    }
+    // 这两个键是后加的，每一个早于它们的 .artiscene 都没有 —— 缺失时就用结构体里的
+    // 默认值（投影、100），而不是报错。
+    if (node["CastsShadow"]) {
+        component.casts_shadow = node["CastsShadow"].as<bool>();
+    }
+    if (node["ShadowDistance"]) {
+        component.shadow_distance = node["ShadowDistance"].as<float>();
     }
     return component;
 }

@@ -393,6 +393,10 @@ void InspectorPanel::drawDirectionalLightComponent(scene::Entity& entity) {
     drawBoolRow("Enabled", &light->enabled);
     drawColorRow("Color", light->color);
     drawFloatRow("Intensity", &light->intensity, 0.1f, 0.0f, 100.0f, "%.2f");
+    drawBoolRow("Casts Shadow", &light->casts_shadow);
+    // 下限不是 0：为 0 时拟合视锥的远端和近端重合，正交范围塔缩成一个点。
+    drawFloatRow("Shadow Distance", &light->shadow_distance, 1.0f, 1.0f, 10000.0f, "%.1f",
+            "How far shadows reach; smaller is sharper");
     endPropertyGrid();
 }
 
