@@ -57,6 +57,21 @@ std::unordered_map<core::UUID, std::string>& environmentEditorStates() {
 
 std::string uuidToText(core::UUID uuid) { return uuid.toString(); }
 
+// 枚举下拉行。names 的下标必须和枚举值对齐（0, 1, 2 …），序列化那边也是按同一个顺序把枚举
+// 写成名字的。目前只有 Inspector 用得到，所以先留在这儿；别的面板要用了再挪进 ui_widgets.h。
+template<typename Enum, std::size_t N>
+void drawEnumRow(const char* label, Enum& value, const char* const (&names)[N],
+        const char* tooltip = nullptr) {
+    propertyRow(label, tooltip);
+    ImGui::PushID(label);
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    int index = static_cast<int>(value);
+    if (ImGui::Combo("##value", &index, names, static_cast<int>(N))) {
+        value = static_cast<Enum>(index);
+    }
+    ImGui::PopID();
+}
+
 // ---- 属性网格里带 glm 的行（网格本身和通用行在 panels/ui_widgets.h）----
 
 void drawColorRow(const char* label, glm::vec3& color, const char* tooltip = nullptr) {
@@ -178,6 +193,10 @@ void drawAddComponentUI(scene::Entity& entity) {
         drawAddMenuItem<engine::CameraComponent>("Camera", entity);
         ImGui::SeparatorText("Environment");
         drawAddMenuItem<engine::EnvironmentComponent>("Environment", entity);
+        // 两个都加上才会被模拟，所以挨在一起放。
+        ImGui::SeparatorText("Physics");
+        drawAddMenuItem<engine::RigidBodyComponent>("Rigid Body", entity);
+        drawAddMenuItem<engine::ColliderComponent>("Collider", entity);
         ImGui::EndPopup();
     }
 }
@@ -223,6 +242,8 @@ void InspectorPanel::draw() {
     drawPointLightComponent(entity);
     drawSpotLightComponent(entity);
     drawEnvironmentComponent(entity);
+    drawRigidBodyComponent(entity);
+    drawColliderComponent(entity);
 
     ImGui::End();
 }
@@ -477,6 +498,73 @@ void InspectorPanel::drawEnvironmentComponent(scene::Entity& entity) {
     drawColorRow("Sky Color", environment->sky_color);
     drawFloatRow("Intensity", &environment->intensity, 0.05f, 0.0f, 100.0f, "%.2f");
 
+    endPropertyGrid();
+}
+
+void InspectorPanel::drawRigidBodyComponent(scene::Entity& entity) {
+    auto* body = tryGet<engine::RigidBodyComponent>(entity);
+    if (body == nullptr) {
+        return;
+    }
+
+    if (!drawComponentHeader<engine::RigidBodyComponent>(entity, "Rigid Body",
+                /*default_open=*/true, "Also needs a Collider, otherwise it is not simulated")) {
+        return;
+    }
+
+    static const char* const kTypes[] = { "Static", "Kinematic", "Dynamic" };
+
+    beginPropertyGrid();
+    drawEnumRow("Type", body->type, kTypes, "Only Dynamic bodies move on their own");
+    // 重力只作用于 dynamic，另两种这一项没有意义 —— 置灰而不是隐藏，免得看着像少了个字段。
+    ImGui::BeginDisabled(body->type != engine::RigidBodyComponent::Type::Dynamic);
+    drawFloatRow("Gravity Scale", &body->gravity_scale, 0.05f, -10.0f, 10.0f, "%.2f");
+    ImGui::EndDisabled();
+    drawBoolRow("Enable Sleep", &body->enable_sleep, "Bodies at rest stop being simulated");
+    endPropertyGrid();
+}
+
+void InspectorPanel::drawColliderComponent(scene::Entity& entity) {
+    auto* collider = tryGet<engine::ColliderComponent>(entity);
+    if (collider == nullptr) {
+        return;
+    }
+
+    if (!drawComponentHeader<engine::ColliderComponent>(entity, "Collider", /*default_open=*/true,
+                "Sizes are explicit here; they do not follow the Transform's scale")) {
+        return;
+    }
+
+    static const char* const kShapes[] = { "Box", "Sphere", "Capsule" };
+
+    beginPropertyGrid();
+    drawEnumRow("Shape", collider->shape, kShapes);
+
+    // 只画当前形状用得到的尺寸行。三种形状的字段都常驻（切回来值还在），但同时摆出来
+    // 会让人不知道哪几行是生效的。
+    switch (collider->shape) {
+        case engine::ColliderComponent::Shape::Box:
+            drawVec3Control("Half Extents", collider->half_extents, glm::vec3{ 0.5f }, 0.01f);
+            // 拖到 0 或负数会让 b3MakeBoxHull 生成退化的凸包，面板上先兜住。
+            for (int axis = 0; axis < 3; ++axis) {
+                collider->half_extents[axis] = std::max(collider->half_extents[axis], 0.001f);
+            }
+            break;
+        case engine::ColliderComponent::Shape::Sphere:
+            drawFloatRow("Radius", &collider->radius, 0.01f, 0.001f, 1000.0f, "%.3f");
+            break;
+        case engine::ColliderComponent::Shape::Capsule:
+            drawFloatRow("Radius", &collider->radius, 0.01f, 0.001f, 1000.0f, "%.3f");
+            drawFloatRow("Half Height", &collider->half_height, 0.01f, 0.001f, 1000.0f, "%.3f",
+                    "Center to hemisphere center, not counting the radius");
+            break;
+    }
+
+    drawFloatRow("Density", &collider->density, 0.05f, 0.0f, 1000.0f, "%.2f",
+            "A Dynamic body needs at least one collider with non-zero density");
+    drawFloatRow("Friction", &collider->friction, 0.01f, 0.0f, 1.0f, "%.2f");
+    drawFloatRow("Restitution", &collider->restitution, 0.01f, 0.0f, 1.0f, "%.2f",
+            "0 does not bounce");
     endPropertyGrid();
 }
 

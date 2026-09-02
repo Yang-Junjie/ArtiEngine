@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 进行中（阶段 1 完成） |
+| **状态** | 进行中（阶段 1 完成；阶段 2 只差一处肉眼验收） |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（全部改动都在这里；ArtiRenderer / ArtiChoco 不动） |
@@ -14,19 +14,37 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：**阶段 1 完成**（1.1 / 1.2 / 1.3 都按各自的验收验过了）。阶段 2～5 未动。
+**当前进度**：**阶段 1 完成**，**阶段 2 代码写完**（2.1 / 2.2 验收过了；2.3 的面板只肉眼看了
+Collider 那半边，见下面「2.3 还差什么」）。阶段 3～5 未动。
 
 - box3d 在 `third_party/box3d`，指针 `47d7f7c`（`v0.1.0-21-g47d7f7c`），`.gitmodules` 里有 `branch = main`。
 - `third_party/CMakeLists.txt` 里 `add_subdirectory(box3d)`；`box3d` target 建得出来，产物是
   `build/lib/box3dd.lib`（`d` 后缀是它自己设的 `DEBUG_POSTFIX`）。
 - `ArtiEngine/runtime/tests/physics_smoke.cpp` + `ArtiEngine/CMakeLists.txt` 的 `BUILD_TESTING` 分支。
   `ctest` 两个测试都过（`physics_smoke` 0.01s、`asset_pipeline_smoke` 0.44s）。
-- **还没提交**：改动全在工作区 —— `.gitmodules` 和 submodule 指针已经 `git add` 过，三个 CMakeLists
-  和测试源文件没有。
 - 1.1 那条的标题还写着「并 pin tag」，是 D1 被改写之前的残留，正文（`git submodule add -b main`）是对的。
+- 阶段 1 两个 commit 已提交（`feat(physics): 接入 box3d …` + `docs(tasks): 物理阶段 1 收工 …`），
+  **还没 push**。阶段 2 的改动还在工作区。
 
-**下一步**：阶段 2.1，在 `ArtiEngine/scene/components.h` 里加 `RigidBodyComponent` 和
-`ColliderComponent`。字段名和 Box3D 的对应关系见下面第 4 条。
+**阶段 2 的实际形状**（组件字段名后面 3.2 建 shape 时要一一对上）：
+
+- `RigidBodyComponent`：`type`（`Type::{Static, Kinematic, Dynamic}`，默认 Dynamic）、
+  `gravity_scale`（1）、`enable_sleep`（true）。枚举**不用** box3d 的 `b3BodyType` ——
+  `components.h` 是引擎公开头，编辑器和 player 都包含它，不该让 box3d 的类型扩散出去。
+- `ColliderComponent`：`shape`（`Shape::{Box, Sphere, Capsule}`）、`half_extents`（0.5³）、
+  `radius`（0.5）、`half_height`（0.5）、`density`（1）、`friction`（0.3）、`restitution`（0）。
+  三种形状的尺寸字段**都常驻**（切回来值还在），面板上只显示当前形状用得到的那几行。
+- 序列化键是 PascalCase（`Type` / `GravityScale` / `EnableSleep` / `Shape` / `HalfExtents` /
+  `Radius` / `HalfHeight` / `Density` / `Friction` / `Restitution`），**枚举按名字写不按数字**
+  （老场景插一项枚举也不会让值悄悄变成另一种；名字不认识时退回默认值，和缺键一样处理）。
+
+**2.3 还差什么**：面板已经在编辑器里跑起来了 —— 给 Cube 加上两个组件之后 Collider 那节显示
+正确（Shape 下拉 = Box、Half Extents 三个 0.500、Density 1.00 / Friction 0.30 / Restitution 0.00）。
+**没肉眼过的是 Rigid Body 那三行、以及把 Shape 切到 Sphere / Capsule 时尺寸行会不会跟着换。**
+（那扇窗口当时正被用户自己点着，我没抢焦点。）
+
+**下一步**：把上面那两条看一眼、2.3 打勾，然后进阶段 3.1 —— 新建
+`ArtiEngine/runtime/physics_system.{h,cpp}`，`artiengine_runtime` 链 `box3d`。
 
 **阶段 1 要确认的三件事 —— 已确认**（都是从 `third_party/box3d/include/box3d/` 的头里读出来的，
 不是从文档抄的）：
@@ -57,6 +75,23 @@
 `physics_smoke` 已经把上面这些都跑过一遍了（三种形状各建一个、逐步消费 `GetBodyEvents`、
 `userData` 塞满 64 位再取回、拆世界后查 `b3GetByteCount()` 回到基线）—— 这就是它作为
 「`--remote` 之后第一个报警的东西」的价值所在，不只是让盒子掉。
+
+**验证手段（阶段 3、4 接着用）**：
+
+- **抓编辑器/播放器窗口**：`build/gui.ps1`（不进仓库，`build/` 是 ignore 的）三个动作 ——
+  `-Action shot` 用 `PrintWindow(hwnd, hdc, 2)` 抓客户区（不用把窗口弄到前台）、
+  `-Action click -X -Y` 客户区坐标点一下（**会抢焦点**）、`-Action keys -Text` 发按键。
+  P/Invoke 那段单独放在 `build/gui_src.cs`：pwsh 7 里 `Add-Type` 编译带 `System.Drawing`
+  的 C# 会因为程序集转发报 CS1069，所以位图和 `Graphics` 都在 PowerShell 侧建，C# 只留纯
+  P/Invoke 签名。
+- **编辑器没有命令行参数、也不会自动打开上次的项目**（`EditorLayer::onAttach` 不开项目，
+  `Open Project...` 只能走文件对话框；`last_open_scene` 是**项目内**的记忆）。所以脚本化地
+  从零打开一个项目要驱动原生对话框 —— 想避开的话，就让人先把项目开着。
+- 阶段 2.2 是用一个临时程序验的（`World::saveScene` / `loadScene` 真存真读，25 条断言，验完删）：
+  照 `build/compile_commands.json` 里 `asset_pipeline_smoke` 的编译行编译、照 `ninja -t commands`
+  的链接行链接，就不用往 CMake 里加临时 target。顺手确认到的两件事：**yaml-cpp 写出来的 float
+  能精确读回**（`0.6f` / `0.4f` 都相等），以及**同一个实体的组件在 YAML 里是按类型名字母序排的**
+  （`artiengine.collider` 在 `artiengine.rigid_body` 前面）。
 
 **决定记录**（时间倒序，新的加在最上面）：
 
@@ -349,7 +384,7 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
 
 ### 阶段 2 · 组件与序列化（画面还不变）
 
-- [ ] **2.1 两个组件**
+- [x] **2.1 两个组件**
   - 文件：`ArtiEngine/scene/components.h`
   - 做法：按 D4 加 `RigidBodyComponent` 和 `ColliderComponent`。默认值：
     body 是 `Dynamic`、`gravity_scale = 1`、`enable_sleep = true`；
@@ -358,13 +393,13 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
   - 注意：尺寸存**半长**还是全长？Box3D 的 `b3MakeBoxHull` 吃半长。组件里也存半长、
     并在字段名和 Inspector 标签里写明「Half Extents」—— 两边一致，省掉一次转换和一类 bug。
 
-- [ ] **2.2 注册与序列化**
+- [x] **2.2 注册与序列化**
   - 文件：`ArtiEngine/scene/component_registration.cpp`（两个 `registerComponentCopy<>`，
     否则 Play 快照会丢掉它们）、`scene/component_serialization.{h,cpp}`（两个稳定的
     `typeName()`：`artiengine.rigid_body` / `artiengine.collider`，写无条件、读容忍缺失）
   - 验收：加了组件的场景存盘后重新打开，值还在；老场景（没有这两个组件）照常加载。
 
-- [ ] **2.3 Inspector**
+- [x] **2.3 Inspector** ← 进行中：Rigid Body 那三行和「切形状换尺寸行」还没肉眼过
   - 文件：`Tools/scene_editor/src/panels/inspector_panel.cpp`（+ 头文件里两个 `draw...` 声明）
   - 做法：body 一个类型下拉 + 两个字段；collider 一个形状下拉 + 尺寸 + 三个材质字段。
     形状切换时只显示该形状用到的尺寸字段（盒子三个半长、球一个半径、胶囊半径 + 半高）。

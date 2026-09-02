@@ -13,6 +13,8 @@ void registerSceneComponents(arti::scene::SceneSerializationRegistry* registry) 
     scene::Scene::registerComponentCopy<PointLightComponent>();
     scene::Scene::registerComponentCopy<SpotLightComponent>();
     scene::Scene::registerComponentCopy<EnvironmentComponent>();
+    scene::Scene::registerComponentCopy<RigidBodyComponent>();
+    scene::Scene::registerComponentCopy<ColliderComponent>();
 
     if (registry != nullptr) {
         registerSceneSerialization(*registry);

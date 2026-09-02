@@ -55,6 +55,22 @@ public:
     EnvironmentComponent deserialize(const YAML::Node& node) const override;
 };
 
+class RigidBodySerialization final : public scene::ComponentSerialization<RigidBodyComponent> {
+public:
+    static constexpr std::string_view typeName() noexcept { return "artiengine.rigid_body"; }
+
+    YAML::Node serialize(const RigidBodyComponent& component) const override;
+    RigidBodyComponent deserialize(const YAML::Node& node) const override;
+};
+
+class ColliderSerialization final : public scene::ComponentSerialization<ColliderComponent> {
+public:
+    static constexpr std::string_view typeName() noexcept { return "artiengine.collider"; }
+
+    YAML::Node serialize(const ColliderComponent& component) const override;
+    ColliderComponent deserialize(const YAML::Node& node) const override;
+};
+
 void registerSceneSerialization(scene::SceneSerializationRegistry& registry);
 
 }
