@@ -37,6 +37,9 @@ endforeach()
 # 目录都可见。ArtiVulkanSDK.cmake 用了 include_guard(GLOBAL)，所以下游再 include 是空操作。
 list(APPEND CMAKE_MODULE_PATH "${ARTIENGINE_ARTIRENDERER_DIR}/ArtiChoco/cmake")
 include(ArtiVulkanSDK)
+# CRT 的可再分发 DLL。产物用动态 CRT（/MD），而 msvcp140 / vcruntime140 那几个不是
+# Windows 自带的，不带上就是「在装过 VS 的机器上能跑」。见模块开头的说明。
+include(ArtiMsvcRuntime)
 
 # ArtiRenderer 这里是被当依赖库消费的，它自己的 samples 和 tests 不需要跟着建。
 set(ARTIRENDERER_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)

@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 阶段 0～5 完成；阶段 6（Release 验收）卡在 6.5 等拍板 |
+| **状态** | 已完成（待 push）|
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（本仓库）、ArtiRenderer（submodule）、ArtiChoco（ArtiRenderer 的 submodule） |
@@ -14,16 +14,16 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：阶段 0～5 全部完成并本地提交（见 5.3）。**阶段 6（Release 发布验收）追加在阶段 5
-之后，6.1～6.4 已过**，Release 产物在 clean PATH + 两条回落路径失效的情况下跑出
-`First frame rendered (4 draw calls)` 并干净退出。
+**当前进度**：**全部完成**，阶段 0～7 共 36 步全部打勾。最后一轮（阶段 6 Release 验收 +
+阶段 7 产物自带 CRT）的结论：Release 产物在 clean PATH、两条回落路径失效的情况下渲染正常，
+且进程加载的 CRT / SDL3 / slang 都来自产物目录而不是 System32。
 
-**下一步**：**6.5 等用户拍板** —— Release 产物还依赖三个 VC redist DLL
-（`MSVCP140.dll` 0.61 MB / `MSVCP140_ATOMIC_WAIT.dll` 0.06 MB / `VCRUNTIME140.dll` 0.17 MB），
-本机 System32 里有，所以 6.4 过了；但那不等于任何机器都行 —— 它们靠 VC++ Redistributable，
-不是 Windows 自带（`MSVCP140_ATOMIC_WAIT.dll` 尤其新，老版本 redist 里没有）。
-两条路（静态链 CRT / 随产物拷 redist）的取舍写在 6.5 里，**不要自己选**。
-6.5 定了才做 6.6，然后 push（三层，见 5.3）。
+**下一步**：只剩 **push**（三层，由内向外，见 5.3）。推送是对外动作，等用户点头。
+
+**没验的那一条**（唯一遗留）：没在一台真正没装 VC++ Redistributable / 没装 Vulkan 驱动的机器
+上跑过产物。本机卸不掉 redist，所以拿到的最强证据是「进程加载的是产物里那一份」——
+exe 所在目录的搜索优先级高于 System32，而这几个 DLL 都不是 KnownDLLs。要真验就得找一台干净
+的虚拟机。
 
 **做完之后的事实**（下一个人可以直接依赖这些）：
 
@@ -565,23 +565,91 @@ D1～D5 全部已定。执行时如果发现某条行不通，**先在交接区�
     → `First frame rendered (4 draw calls)` → `ArtiChoco stopped`，干净退出 exit 0，无 error。
     回落路径已恢复。
 
-- [ ] **6.5 判定 CRT 要不要处理**
+- [x] **6.5 判定 CRT 要不要处理**
   - 做法：6.4 过了说明**本机**的 System32 已经提供了 Release CRT。但那不等于「任何机器都行」
     —— `msvcp140.dll` / `vcruntime140*.dll` 靠 VC++ Redistributable，不是 Windows 自带。
     所以这一步的产出是一个判断，不是一次运行：产物要不要自带 CRT。
-  - 两条路（**需要用户拍板，不要自己选**）：
-    - **静态链 CRT**（`/MT`）—— 产物零 CRT 依赖，最干脆；代价是二进制变大，而且所有 target
-      得统一（混用 `/MT` 和 `/MD` 会在链接期或运行期炸）。注意本项目用 clang 走 MSVC ABI，
-      要确认 `CMAKE_MSVC_RUNTIME_LIBRARY` 在这条工具链上生效。
-    - **随产物拷 redist DLL** —— 改动小（`InstallRequiredSystemLibraries` 或手动指路），
-      但多三个文件，而且要跟着 VS 版本走。
-  - 验收：交接区里记下选了哪条和理由；如果选了要动手，另开一份任务文档。
+  - 结果：**用户拍板：动态链接（保持 `/MD`），把 redist DLL 随产物拷。** 实现见阶段 7。
+    没选静态链 CRT，所以不动 `CMAKE_MSVC_RUNTIME_LIBRARY`，也不用担心 `/MT` 和 `/MD` 混用
+    以及第三方静态库跟着重编。
 
-- [ ] **6.6 回写文档**
-  - 文件：`docs/Architecture/README.md`（§7「明确未做」里的「Release 发布验收」一条）、
-    `docs/Architecture/Applications.md`（§5 末尾那条 Debug 提醒）
-  - 做法：按 6.4 的结果订正。如果 6.5 决定要自带 CRT，那条改成指向新任务而不是删掉。
-  - 验收：文档和实际行为一致。
+- [x] **6.6 回写文档**
+  - 文件：`docs/Architecture/README.md`（§7「明确未做」）、`docs/Architecture/Applications.md`（§5）
+  - 结果：先按 6.4 的结果订正过一轮（Release 可搬移性已验，剩 CRT 未定），阶段 7 做完之后
+    再订正成「产物自带 CRT」。
+
+---
+
+### 阶段 7 · 产物自带 CRT（6.5 定了「动态链接 + 随产物拷 redist」之后）
+
+- [x] **7.1 新建 `ArtiMsvcRuntime.cmake`**
+  - 文件：`ArtiRenderer/ArtiChoco/cmake/ArtiMsvcRuntime.cmake`（新建）
+  - 做法：发现 CRT redist 目录并提供 `artichoco_stage_msvc_runtime(target)`，形状和
+    `artichoco_stage_vulkan_sdk_runtime()` 一致。发现顺序：`ARTI_MSVC_REDIST_DIR`（显式）→
+    `$ENV{VCToolsRedistDir}`（开发者命令提示符）→ `vswhere` 找 VS 安装位置再 glob
+    `VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT`，自然序取最大。非 Windows 上函数是空操作。
+  - 验收：配置期打出 `ArtiChoco MSVC CRT redist: <path> (N dll)`。
+  - 结果：`H:/Visual Studio/Community/VC/Redist/MSVC/14.51.36231/x64/Microsoft.VC145.CRT
+    (10 dll)`。
+  - **没用 `InstallRequiredSystemLibraries`**：那个模块是 `if(MSVC)` 把门的，而本项目用独立
+    clang 走 MSVC ABI（`CMAKE_CXX_COMPILER_FRONTEND_VARIANT` 是 `GNU`），此时 CMake 的 `MSVC`
+    和 `MSVC_TOOLSET_VERSION **都是空的**，模块会静默什么都不做。单独建了个测试工程验过。
+  - **找不到时 `message(WARNING)` 而不是 `FATAL_ERROR`**：缺 CRT 只影响产物能不能拿去别的
+    机器，不影响本机构建和运行（能构建说明本机装着 CRT）。为一个打包问题让整个构建配不起来
+    不划算。
+
+- [x] **7.2 整个 CRT 目录都拷，不只挑导入表里那三个**
+  - 验收：这个决定要有依据，不能只凭「反正不大」。
+  - 结果：**有依据，而且是必须的。** 跑起来看进程实际加载的模块，`VCRUNTIME140_1.dll` 也被
+    加载了 —— 它**不在 exe 的静态导入表里**，是 `MSVCP140.dll` 自己拉进来的。只拷那三个的话
+    它会回落到 System32，在没装 redist 的机器上就是缺文件。多出来的七个共约 1.1 MB，
+    产物本身百 MB 量级，代价可忽略。
+
+- [x] **7.3 四个 target 加调用**
+  - 文件：根 `CMakeLists.txt`（`include(ArtiMsvcRuntime)`）、`Runtime/player/CMakeLists.txt`、
+    `Tools/scene_editor/CMakeLists.txt`、`Tools/asset_tools/CMakeLists.txt`（含
+    `asset_pipeline_smoke`）
+  - 验收：`build-release/bin/` 下出现 10 个 CRT DLL。
+  - 结果：13 个 DLL（10 CRT + SDL3 + slang + slang-compiler），共 28 MB。
+
+- [x] **7.4 pack 不用改**
+  - 验收：`pack` 的产物里有 CRT DLL。
+  - 结果：**确实不用改。** `copyRuntimeFiles()` 是「把 `runtime_dir` 下所有 `*.dll` 拷过去」，
+    staging 一放进 `build-release/bin`，pack 就自动带上了 —— `27 runtime file(s)`
+    （13 DLL + 13 shader + 1 播放器），比之前的 17 多了 10 个。当初「按通配拷、不硬编码文件名」
+    这个决定在这里第二次回本（第一次是 Release 的不带 d 文件名）。
+
+- [x] **7.5 验证产物真的在用自己那份 CRT**
+  - 做法：光看「文件在不在」不够 —— System32 里也有同名文件，得确认加载的是哪一份。
+    起进程之后读 `$p.Modules` 的 `FileName`。同时照 6.4 把两条回落路径改名、PATH 清干净。
+  - 验收：CRT 模块的路径指向产物目录，且照常渲染。
+  - 结果：**通过。**
+    ```
+    MSVCP140.dll              H:\tmp\artipack-crt\MSVCP140.dll
+    MSVCP140_ATOMIC_WAIT.dll  H:\tmp\artipack-crt\MSVCP140_ATOMIC_WAIT.dll
+    VCRUNTIME140.dll          H:\tmp\artipack-crt\VCRUNTIME140.dll
+    VCRUNTIME140_1.dll        H:\tmp\artipack-crt\VCRUNTIME140_1.dll
+    SDL3.dll / slang.dll / slang-compiler.DLL   都在产物目录
+    ucrtbase.dll / msvcp_win.dll                System32（UCRT，Windows 自带，正确）
+    ```
+    日志：`Loading shaders from 'H:\tmp\artipack-crt\shaders' (staged next to the executable)`
+    → `First frame rendered (4 draw calls)` → `ArtiChoco stopped`，干净退出 exit 0。
+  - **仍然没验的**：真正一台没装 VC++ Redistributable 的机器。本机无法卸载 redist 来测，
+    但「进程加载的是产物里那一份」已经是能拿到的最强证据 —— exe 所在目录的搜索优先级高于
+    System32，而这几个 DLL 都不是 KnownDLLs。
+- [x] **7.6 Debug 构建跳过 CRT staging**
+  - 做法：第一版无条件拷，结果 `build/bin` 里也堆进了 10 个 release CRT DLL —— Debug exe 链的是
+    调试 CRT（`MSVCP140D` / `VCRUNTIME140D` / `ucrtbased`），那 10 个**一个都不会被加载**。
+    在函数里加一句 `if(CMAKE_BUILD_TYPE STREQUAL "Debug") return()`。
+  - 为什么值得加这几行：留着的话输出目录里十个没人用的文件会让人以为 Debug 产物也是可发布的；
+    更糟的是拿 Debug 构建去 pack 会得到「exe 要调试 CRT、包里装的是 release CRT」的组合，
+    在别人机器上照样跑不起来，而包看起来是完整的。
+  - 单配置生成器（本项目用 Ninja）配置期就知道 `CMAKE_BUILD_TYPE`；多配置生成器下它是空的、
+    判断为假、照常拷 —— 那种情况下宁可多拷也不要少拷。
+  - 验收：Debug 的 `build/bin` 只有 3 个 DLL（`SDL3d` / `slang` / `slang-compiler`），
+    Release 的 `build-release/bin` 有 13 个。两边 `arti_player --help` 在 clean PATH 下都 exit 0。
+  - 结果：如上，两边都过。`ctest` 在两个配置下都过。
+
 
 ---
 

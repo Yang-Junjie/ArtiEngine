@@ -34,4 +34,4 @@
 
 | 文件 | 状态 | 一句话 |
 | --- | --- | --- |
-| [2026-09-02-runtime-portability.md](2026-09-02-runtime-portability.md) | 已完成（待 push）| 让构建产物可搬移：DLL staging、shader / 字体两段查找、pack 写进运行时文件 |
+| [2026-09-02-runtime-portability.md](2026-09-02-runtime-portability.md) | 已完成（待 push）| 让构建和打包产物可搬移：DLL / CRT / shader staging、shader 与字体两段查找、pack 写进运行时文件 |

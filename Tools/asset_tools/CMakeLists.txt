@@ -32,6 +32,7 @@ if(BUILD_TESTING)
     add_test(NAME asset_pipeline_smoke COMMAND asset_pipeline_smoke)
     # ctest 不应该依赖 SDK 在 PATH 上：它链了 slang，缺 DLL 进程起不来。
     artichoco_stage_vulkan_sdk_runtime(asset_pipeline_smoke)
+    artichoco_stage_msvc_runtime(asset_pipeline_smoke)
 endif()
 # 运行时依赖和内建 shader 拷到 exe 旁边。
 #
@@ -39,4 +40,5 @@ endif()
 #   - slang.dll 是静态导入的，缺了进程连加载都过不去
 #   - pack 是从**自己 exe 旁边**取运行时文件的，所以 shaders/ 也得在
 artichoco_stage_vulkan_sdk_runtime(asset_tools)
+artichoco_stage_msvc_runtime(asset_tools)
 artirenderer_stage_shaders(asset_tools)

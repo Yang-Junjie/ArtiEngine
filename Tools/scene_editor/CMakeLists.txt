@@ -51,6 +51,7 @@ set_target_properties(scene_editor PROPERTIES
 )
 # 运行时依赖和内建 shader 拷到 exe 旁边，和 arti_player 一致。
 artichoco_stage_vulkan_sdk_runtime(scene_editor)
+artichoco_stage_msvc_runtime(scene_editor)
 artirenderer_stage_shaders(scene_editor)
 
 # UI 资源（字体）拷到 exe 旁边。ARTIENGINE_TOOLS_RES_DIR 只是回落，优先用这一份，

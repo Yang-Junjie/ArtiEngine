@@ -188,7 +188,7 @@ docs/Architecture/   本目录
   Library/Artifacts/**         所有 artifact，含 builtin
   Assets/**/*.artiscene        只有场景，没有源模型 / 贴图 / .meta
   shaders/**                   内建 .slang —— 着色器是运行期编译的，必须跟着走
-  *.dll                        SDL3 / slang / slang-compiler
+  *.dll                        SDL3 / slang / slang-compiler + MSVC CRT redist（10 个）
   arti_player.exe              播放器本体（`--no-player` 可以不带）
 ```
 
@@ -213,6 +213,13 @@ cmake --build --preset debug
 - 运行时 DLL 由 `artichoco_stage_vulkan_sdk_runtime()` 拷到 exe 旁边。注意 `slang.dll` 只是个
   转发器，实现在 `slang-compiler.dll` 里、由它在运行时 `LoadLibrary` 加载 ——
   `$<TARGET_RUNTIME_DLLS>` 看不见这条依赖，所以那个函数里显式补了一条。
+- MSVC 的 CRT 可再分发 DLL 由 `artichoco_stage_msvc_runtime()` 拷到 exe 旁边（整个
+  `Microsoft.VC<n>.CRT` 目录，10 个文件）。产物用动态 CRT（`/MD`），而 `msvcp140` /
+  `vcruntime140` 那几个不是 Windows 自带的 —— `api-ms-win-crt-*` 那个 UCRT 才是。目录整拷而不是
+  只挑导入表里那三个：`VCRUNTIME140_1.dll` 是 `MSVCP140.dll` 自己拉进来的，不在 exe 的静态
+  导入表里。CRT 找不到时只警告不报错 —— 那只影响产物能不能拿去别的机器，不影响本机构建。
+  CMake 自带的 `InstallRequiredSystemLibraries` 在这条工具链上不可用（它 `if(MSVC)` 把门，
+  而独立 clang 走 MSVC ABI 时 `MSVC` 是空的），所以发现逻辑自己写在 `ArtiMsvcRuntime.cmake`。
 - `ARTIENGINE_BUILD_TOOLS=OFF` 可以只建引擎和播放器。`Runtime/` 没有开关 —— 运行时是交付物，
   不是可选工具。
 - 测试：`ctest`。目前 ArtiEngine 侧只有 `asset_pipeline_smoke`，渲染侧的冒烟覆盖在
@@ -236,7 +243,8 @@ cmake --build --preset debug
 | 场景作为资产 | `.artiscene` 没有 handle、没有 artifact，靠项目根相对路径引用 |
 | rename / delete 感知 | 在文件管理器里改名会让旧 UUID 变孤儿被回收、新文件拿新 UUID，场景引用静默失效。变通办法是连 `.meta` 一起改名 |
 | 非 Windows 平台 | 两处卡住：`ArtiTools::Platform`（文件对话框）只有 Win32 实现；运行时依赖 staging 在非 Windows 上只设 `BUILD_RPATH`、不拷文件，所以产物可搬移性只在 Windows 上验过 |
-| 产物自带 CRT | Debug 和 Release 的可搬移性都验过了（clean PATH + 回落路径失效下能渲染），但 Release 产物仍靠三个 VC redist DLL（`MSVCP140` / `MSVCP140_ATOMIC_WAIT` / `VCRUNTIME140`）—— 那不是 Windows 自带的。要么静态链 CRT，要么把它们拷进产物，未定；而 Debug 产物链的调试 CRT 本身就不可再分发，发布只能用 Release |
+| 真实干净机器的验收 | Debug / Release 的可搬移性都验过（clean PATH + 回落路径失效下能渲染），CRT 也确认加载的是产物里那一份。但没在一台真正没装 VC++ Redistributable / 没装 Vulkan 驱动的机器上跑过 |
+| 发布只能用 Release | Debug 产物链的调试 CRT（`ucrtbased.dll` 等）不可再分发，而 staging 拷的是 redist 里的 release CRT。目前没有机制防止用 Debug 构建去 pack |
 | 导入设置 / Extract 的编辑器 UI | `AssetPipeline` 的 `sourceSettings` / `setAuthoredSetting` / `extractMaterial` 都在，但只有 CLI 在调。Content Browser 的预览栏目前只显示状态，不能改设置 |
 | 打包的编辑器入口 | 没有「Build」菜单项，只有 `asset_tools pack` |
 

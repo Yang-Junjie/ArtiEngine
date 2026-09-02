@@ -29,4 +29,5 @@ set_target_properties(arti_player PROPERTIES
 # slang-compiler.dll）和内建 shader。不拷的话产物只能在 SDK 在 PATH 上、且源码树
 # 没挪窝的机器上跑 —— 而这个 exe 正是拿去发布的那一个。
 artichoco_stage_vulkan_sdk_runtime(arti_player)
+artichoco_stage_msvc_runtime(arti_player)
 artirenderer_stage_shaders(arti_player)
