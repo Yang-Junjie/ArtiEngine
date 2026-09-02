@@ -153,13 +153,17 @@ Vulkan SDK、也没有源码树的机器上能直接跑。
 先校验完整性、缺 DLL / shader 算失败但缺播放器只 warn、场景为什么还在 `Assets/` 下）
 在 [Assets.md](Assets.md#7-打包)。
 
-两个还欠着的：
+产物的运行要求（Windows 10+ x64、支持 Vulkan 1.3 的驱动、目录可写）见
+[README.md](README.md#运行要求打包产物)。**不支持旧设备是明确的产品决定** ——
+Vulkan 1.3 这个下限是刻意的，不要为更老的设备加回落路径。
+
+还欠着的：
 
 - **`pack` 只有 CLI 一条路**，编辑器里没有「Build」菜单项。
 - **没在真正干净的机器上验过**：clean PATH、回落路径失效、CRT 加载的确实是产物里那一份
   （看过进程的模块列表），但没在一台没装 VC++ Redistributable / 没装 Vulkan 驱动的机器上跑过。
-  `vulkan-1.dll` 靠显卡驱动提供，那一份不能也不应该随产物走。
-
-另外：**发布只能用 Release 构建**。Debug 产物链的是调试 CRT（`ucrtbased.dll` /
-`MSVCP140D.dll` / `VCRUNTIME140D.dll`），那几个不可再分发，而 staging 拷进产物的是 redist 里的
-release CRT。目前没有机制防止用 Debug 构建去 pack。
+- **发布只能用 Release 构建**。Debug 产物链的是调试 CRT（`ucrtbased.dll` / `MSVCP140D.dll` /
+  `VCRUNTIME140D.dll`），那几个不可再分发，而 staging 拷进产物的是 redist 里的 release CRT。
+  目前没有机制防止用 Debug 构建去 pack。
+- **两处粗糙的地方**：日志固定写在 exe 旁边且写不出来就退出（只读位置起不来）；播放器是
+  console 子系统，双击会多开一个黑框，失败信息也只在那里。见 README 的「明确未做」。

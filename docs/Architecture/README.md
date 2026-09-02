@@ -228,6 +228,24 @@ cmake --build --preset debug
 代码风格约定：4 空格、100 列、LF。仓库根有 `.clang-format`，但**既有文件并没有按它格式化
 过** —— 改老文件时手写成周围的风格，不要跑格式化工具，否则 diff 里全是与改动无关的噪声。
 
+### 运行要求（打包产物）
+
+产物自带 CRT、SDL3、slang 和着色器，所以目标机器只需要这三样：
+
+| 要求 | 说明 |
+| --- | --- |
+| Windows 10+ x64 | UCRT（`api-ms-win-crt-*` / `ucrtbase.dll`）是系统自带的；更老的 Windows 要额外装 UCRT 更新 |
+| 支持 **Vulkan 1.3** 的显卡驱动 | `deviceScore()` 里 `apiVersion < VK_API_VERSION_1_3` 直接返回 0，达不到就抛 `No Vulkan device supports graphics, presentation, and swapchains`。Vulkan 1.3 是 2022 年初发布的，所以实际门槛是驱动别太旧 |
+| 产物目录可写 | `logs/ArtiChoco.log` 建在 exe 旁边，建不出来会让进程直接以失败退出 —— 解压到 `C:\Program Files\...` 之类只读位置起不来 |
+
+`vulkan-1.dll` 由显卡驱动提供，刻意不随产物走。
+
+**不支持旧设备是明确的产品决定**，所以不要为 Vulkan 1.2 或更早的设备加回落路径。
+`supportsRenderingExtensions()` 里那条「1.1 / 1.2 设备只要有 `VK_KHR_dynamic_rendering` +
+`VK_KHR_synchronization2` 也算支持」的分支因此是**死代码** —— `deviceScore()` 的 1.3 门槛在它
+之前就把设备刷掉了。两处对「最低要求」的判断不一致，但结论一致，删掉那条分支只是让代码说出
+本来的意思，不改变行为。
+
 ## 7. 明确未做
 
 写下来是为了让「没有」和「找不到」区分开。
@@ -244,6 +262,8 @@ cmake --build --preset debug
 | rename / delete 感知 | 在文件管理器里改名会让旧 UUID 变孤儿被回收、新文件拿新 UUID，场景引用静默失效。变通办法是连 `.meta` 一起改名 |
 | 非 Windows 平台 | 两处卡住：`ArtiTools::Platform`（文件对话框）只有 Win32 实现；运行时依赖 staging 在非 Windows 上只设 `BUILD_RPATH`、不拷文件，所以产物可搬移性只在 Windows 上验过 |
 | 真实干净机器的验收 | Debug / Release 的可搬移性都验过（clean PATH + 回落路径失效下能渲染），CRT 也确认加载的是产物里那一份。但没在一台真正没装 VC++ Redistributable / 没装 Vulkan 驱动的机器上跑过 |
+| 日志路径 | `logs/ArtiChoco.log` 固定建在 exe 旁边，且建不出来就让进程失败退出。装在只读位置的产物起不来 —— 该降级成「只输出到控制台」或改写 `%LOCALAPPDATA%` |
+| 播放器是 console 子系统 | 双击会多开一个黑框；失败信息只在那个控制台和日志里，没有弹窗，所以驱动不达标的人看到的是一闪而过的黑框 |
 | 发布只能用 Release | Debug 产物链的调试 CRT（`ucrtbased.dll` 等）不可再分发，而 staging 拷的是 redist 里的 release CRT。目前没有机制防止用 Debug 构建去 pack |
 | 导入设置 / Extract 的编辑器 UI | `AssetPipeline` 的 `sourceSettings` / `setAuthoredSetting` / `extractMaterial` 都在，但只有 CLI 在调。Content Browser 的预览栏目前只显示状态，不能改设置 |
 | 打包的编辑器入口 | 没有「Build」菜单项，只有 `asset_tools pack` |
