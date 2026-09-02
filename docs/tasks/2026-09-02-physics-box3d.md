@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 进行中（阶段 1、2 完成） |
+| **状态** | 进行中（阶段 1～3 完成，盒子会掉了） |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（全部改动都在这里；ArtiRenderer / ArtiChoco 不动） |
@@ -14,8 +14,8 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：**阶段 1、2 完成**（2.1～2.3 各自的验收都过了；2.3 那两节面板由用户在编辑器里
-肉眼确认）。阶段 3～5 未动。
+**当前进度**：**阶段 1～3 完成 —— 盒子真的掉下来、堆起来了。** 阶段 4（Simulate 模式）、
+5（文档收尾）未动。
 
 - box3d 在 `third_party/box3d`，指针 `47d7f7c`（`v0.1.0-21-g47d7f7c`），`.gitmodules` 里有 `branch = main`。
 - `third_party/CMakeLists.txt` 里 `add_subdirectory(box3d)`；`box3d` target 建得出来，产物是
@@ -23,7 +23,7 @@
 - `ArtiEngine/runtime/tests/physics_smoke.cpp` + `ArtiEngine/CMakeLists.txt` 的 `BUILD_TESTING` 分支。
   `ctest` 两个测试都过（`physics_smoke` 0.01s、`asset_pipeline_smoke` 0.44s）。
 - 1.1 那条的标题还写着「并 pin tag」，是 D1 被改写之前的残留，正文（`git submodule add -b main`）是对的。
-- 阶段 1、2 都已提交（三个 commit），**还没 push**。
+- 阶段 1～3 都已提交，**还没 push**。
 
 **阶段 2 的实际形状**（组件字段名后面 3.2 建 shape 时要一一对上）：
 
@@ -37,8 +37,42 @@
   `Radius` / `HalfHeight` / `Density` / `Friction` / `Restitution`），**枚举按名字写不按数字**
   （老场景插一项枚举也不会让值悄悄变成另一种；名字不认识时退回默认值，和缺键一样处理）。
 
-**下一步**：阶段 3.1 —— 新建 `ArtiEngine/runtime/physics_system.{h,cpp}`，挂进
-`artiengine_runtime` 的源文件列表并让它链 `box3d`。
+**阶段 3 的结果**（数值和画面都验过）：
+
+- `ArtiEngine/runtime/physics_system.{h,cpp}`，pimpl，`b3*` 一个都没出现在头里；
+  `artiengine_runtime` **PRIVATE** 链 `box3d`（下游看不见 box3d 的头）。系统注册在 `World` 的
+  构造函数里，全工程唯一一处。
+- 测试场景 **`projects/Assets/Scenes/physics_test.artiscene`**（留在仓库里，阶段 4 接着用）：
+  三个单位立方体从 y = 0 / 1.5 / 3 掉到静态地面上，**外加三个「该被跳过」的实体** ——
+  缩放过的地面视觉体、只有 Collider 的球、带父级的头盔子节点。
+- 无头跑 4 秒的实测：Box A/B/C 落在 `y = -0.866 / 0.133 / 1.132`（算出来的预期是
+  -0.866 / 0.134 / 1.134），水平漂移 < 0.03，朝向仍是单位四元数（w 没放错位置），再跑 2 秒
+  一动不动；被跳过的三个原地没动。日志正好是 `Physics world built: 4 bodies (3 entities skipped)`
+  加三条对得上的 warn —— **所以 4.5 那两条 warn 其实已经看到了**，到时候只是在编辑器里再确认一次。
+- `PrintWindow` 抓播放器窗口：t≈1s 和 t≈4s 两张图一模一样（堆好了不抖）。
+
+**做法上和文档不一样的三处（都是往稳的方向改，不是绕过）**：
+
+1. **重建信号用「帧号不再单调递增」而不是 `frameIndex == 0`。** 信号源还是 D5 说的
+   `resetClock()`，但比较单调性顺带就是文档要求的「这一帧已经建过了」那道保护 ——
+   `FixedUpdate` 一帧里可能被调多次（追帧），写成 `== 0` 还得再加一个标志位。
+2. **「建了 N 个 body」那条日志留下来了**（`debug` 级，一次模拟一条），没按 3.2 的
+   「验完删日志」删。理由：ArtiScene 自己就在 `debug` 打「Copied 10 entities」这类行，这条是
+   同一类东西，而且下次物理出问题第一个要看的就是它。
+3. **地面在场景里是两个实体**：一个缩放过的立方体只做视觉、一个不缩放的空实体只做碰撞体
+   （半长 8 × 0.5 × 8，上表面和视觉地面对齐）。这是 D3 的直接后果 —— 缩放过的实体不参与模拟，
+   而「一块大地面」在视觉上必须缩放。**给场景搭物理的人都会撞上这条**，所以记在这儿。
+
+**阶段 4 要先想清楚的一件事（现在就发现了）**：4.3 的验收里写着「gizmo 还在（能把盒子推一把）」，
+但 D3 说模拟期间 transform 归物理 —— 每个固定步长物理都会把 `TransformComponent` 写回去，所以拖
+gizmo 的效果会被下一步覆盖（body 睡着时看起来能拖，一醒又弹回去）。真要「推一把」得把 transform
+反向同步给 body，而 `b3Body_SetTransform` 的文档明确说那是**传送**、会有性能和行为问题。
+**建议**：4.3 的验收改成「gizmo 在、能选中、能看数值在变」，把「推一把」单独记成后续任务（要么
+做「拖动时给 body 设速度」，要么只在 Stop 之后允许改）。**别在 4.3 里顺手塞一个 SetTransform。**
+
+**下一步**：阶段 4.1 —— `EditorContext` 三态化（`Mode` 加 `Simulate`、`isPlaying()` 拆成
+`isSimulating()` / `isGameView()`、`updatePlay()` 改名 `updateSimulation()`），然后按 D8 那张表
+逐个改五个调用点。
 
 **阶段 1 要确认的三件事 —— 已确认**（都是从 `third_party/box3d/include/box3d/` 的头里读出来的，
 不是从文档抄的）：
@@ -401,7 +435,7 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
 
 ### 阶段 3 · 物理系统（`FixedUpdate` 的第一个消费者）
 
-- [ ] **3.1 `PhysicsSystem` 骨架**
+- [x] **3.1 `PhysicsSystem` 骨架**
   - 文件：`ArtiEngine/runtime/physics_system.{h,cpp}`（新建）+ 挂进 `ArtiEngine/CMakeLists.txt` 的
     `artiengine_runtime` 源文件列表；`artiengine_runtime` 链 `box3d`
   - 做法：继承 `scene::SceneSystem`，实现 `onUpdate(Scene&, const UpdateContext&)`。
@@ -409,7 +443,7 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
     头会被 `World` 包含，而 `World` 的头被编辑器和 player 都包含）。
   - 验收：编译通过。
 
-- [ ] **3.2 建世界 / 拆世界**
+- [x] **3.2 建世界 / 拆世界**
   - 做法：`frameIndex == 0` 时（见 D5）拆掉旧世界、按当前场景重建：遍历同时有
     `RigidBodyComponent` 和 `ColliderComponent` 的实体，跳过有父级的（warn）、跳过非单位缩放的
     （warn），按组件建 body 和 shape，`bodyDef.userData` 存实体的 UUID。
@@ -418,7 +452,7 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
     但要在注释里写明这是有意的。
   - 验收：临时日志打出「建了 N 个 body」，数目和场景里的物理实体数对得上。**验完删日志。**
 
-- [ ] **3.3 step 与写回**
+- [x] **3.3 step 与写回**
   - 做法：`b3World_Step(world, context.fixedDeltaTime, 4)`，然后
     `b3World_GetBodyEvents()` 遍历移动事件，按 `userData` 找实体，写 `TransformComponent` 的
     translation 和 rotation（**不动 scale**）。
