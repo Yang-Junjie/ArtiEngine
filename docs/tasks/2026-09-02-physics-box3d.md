@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 未开始 |
+| **状态** | 进行中（阶段 1 完成） |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（全部改动都在这里；ArtiRenderer / ArtiChoco 不动） |
@@ -14,13 +14,49 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：未开始。阶段 1～5 全部未动。
+**当前进度**：**阶段 1 完成**（1.1 / 1.2 / 1.3 都按各自的验收验过了）。阶段 2～5 未动。
 
-**下一步**：阶段 1.1，把 box3d 作为 submodule 接进来（**跟 `main`，不 pin tag**）。
-这一步不碰引擎集成，只确认「库能建起来、能让一个盒子在纯 C 的冒烟测试里掉下来」。
+- box3d 在 `third_party/box3d`，指针 `47d7f7c`（`v0.1.0-21-g47d7f7c`），`.gitmodules` 里有 `branch = main`。
+- `third_party/CMakeLists.txt` 里 `add_subdirectory(box3d)`；`box3d` target 建得出来，产物是
+  `build/lib/box3dd.lib`（`d` 后缀是它自己设的 `DEBUG_POSTFIX`）。
+- `ArtiEngine/runtime/tests/physics_smoke.cpp` + `ArtiEngine/CMakeLists.txt` 的 `BUILD_TESTING` 分支。
+  `ctest` 两个测试都过（`physics_smoke` 0.01s、`asset_pipeline_smoke` 0.44s）。
+- **还没提交**：改动全在工作区 —— `.gitmodules` 和 submodule 指针已经 `git add` 过，三个 CMakeLists
+  和测试源文件没有。
+- 1.1 那条的标题还写着「并 pin tag」，是 D1 被改写之前的残留，正文（`git submodule add -b main`）是对的。
 
-**阶段 1 要顺手确认并记在这里的三件事**（我只从文档确认了 `b3CreateHullShape`）：
-球和胶囊的创建函数名、`b3World_GetBodyEvents` 返回结构的字段名、CMake 选项的实际名字。
+**下一步**：阶段 2.1，在 `ArtiEngine/scene/components.h` 里加 `RigidBodyComponent` 和
+`ColliderComponent`。字段名和 Box3D 的对应关系见下面第 4 条。
+
+**阶段 1 要确认的三件事 —— 已确认**（都是从 `third_party/box3d/include/box3d/` 的头里读出来的，
+不是从文档抄的）：
+
+1. **球和胶囊的创建函数**：`b3CreateSphereShape(bodyId, &shapeDef, &sphere)` 吃
+   `b3Sphere{ b3Vec3 center; float radius; }`；`b3CreateCapsuleShape(bodyId, &shapeDef, &capsule)` 吃
+   `b3Capsule{ b3Vec3 center1; b3Vec3 center2; float radius; }` —— **是两个半球心 + 半径，不是
+   「半高 + 半径」**，所以组件里存半径 + 半高的话，建 shape 时要换算成 `center1/2 = ±half_height * y`。
+   另外还有 `b3CreateTransformedHullShape` / `b3CreateMeshShape` / `b3CreateHeightFieldShape` /
+   `b3CreateBakedCompoundShape`，v1 都不用。
+2. **`b3World_GetBodyEvents` 的字段**：返回 `b3BodyEvents{ b3BodyMoveEvent* moveEvents; int moveCount; }`，
+   每条是 `b3BodyMoveEvent{ void* userData; b3WorldTransform transform; b3BodyId bodyId; bool fellAsleep; }`。
+   单精度下 `b3WorldTransform` 就是 `b3Transform{ b3Vec3 p; b3Quat q; }`，所以**写回直接读
+   `move.transform.p` / `.q`，不用再逐个 `b3Body_GetPosition`**。
+3. **CMake 选项**：`BOX3D_SAMPLES` / `BOX3D_BENCHMARKS`（不是 `BENCHMARK`）/ `BOX3D_UNIT_TESTS` /
+   `BOX3D_DOCS` / `BOX3D_BUILD_SHADERS` / `BOX3D_PROFILE` / `BOX3D_VALIDATE` **全都定义在它自己的
+   `if(PROJECT_IS_TOP_LEVEL)` 里面**，作为 submodule 消费时这些变量根本不存在 —— 1.2 那条「先把开关
+   关掉」无事可做。消费者能看到的只有 `BOX3D_DISABLE_SIMD` / `BOX3D_COMPILE_WARNING_AS_ERROR` /
+   `BOX3D_DOUBLE_PRECISION`，都默认 OFF（`build/CMakeCache.txt` 里就这三条，外加
+   `box3d_IS_TOP_LEVEL:STATIC=OFF`）。顺带：`BOX3D_VALIDATE`（重校验）也因此对我们是关的。
+
+**顺手确认的第四件事**（阶段 2.1 和 3.2 直接要用）：材质属性在 `b3ShapeDef` 上**嵌了一层** ——
+`shapeDef.density` 是平的，但 friction / restitution 在 `shapeDef.baseMaterial` 里
+（`b3SurfaceMaterial`，还带 `rollingResistance` / `tangentVelocity` / `userMaterialId`）。
+`b3BodyDef` 那边 D4 要的三个字段名字正好对得上：`type` / `gravityScale` / `enableSleep`
+（另有 `sleepThreshold` / `motionLocks` / `isAwake`，v1 不碰）。
+
+`physics_smoke` 已经把上面这些都跑过一遍了（三种形状各建一个、逐步消费 `GetBodyEvents`、
+`userData` 塞满 64 位再取回、拆世界后查 `b3GetByteCount()` 回到基线）—— 这就是它作为
+「`--remote` 之后第一个报警的东西」的价值所在，不只是让盒子掉。
 
 **决定记录**（时间倒序，新的加在最上面）：
 
@@ -29,7 +65,21 @@
 - 2026-09-02 用户拍板：**用 Box3D**（不是 Jolt），其余按我的建议 —— transform 在模拟期归物理、
   第一版只做球 / 盒 / 胶囊、不做射线查询和触发器。
 
-**踩到的坑**：（暂无）
+**踩到的坑**：
+
+- **box3d 强制静态 CRT，必须在我们这边掰回来。** 它的 CMakeLists 顶上无条件
+  `set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")`（也就是 /MT，
+  注释说是为了方便查内存泄漏），而本项目其余部分是 /MD —— 两者混进一个二进制会在链接期或运行期炸。
+  已经在 `third_party/CMakeLists.txt` 里用 `set_target_properties(box3d PROPERTIES
+  MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")` 修掉，理由写在那儿的注释里。
+  **不要以为「clang 走 GNU 前端所以 MSVC_ 那套无效」** —— 实测 CMake 在这条工具链上照样把它翻译成
+  `--dependent-lib=`。现在 `build/compile_commands.json` 里 box3d 那 50 条都是
+  `--dependent-lib=msvcrtd`，和其余部分一致。
+- **box3d 会往我们的源码根设 `FETCHCONTENT_BASE_DIR`**：它写的是
+  `set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/.fetchcontent-cache" CACHE PATH ...)`，而
+  `CMAKE_SOURCE_DIR` 是**我们的**根。今天无害（只有 top-level-only 的 `BOX3D_PROFILE` 会真的下载
+  Tracy，所以那个目录根本没被创建），但哪天开了会 FetchContent 的东西，仓库根会多一个没进
+  `.gitignore` 的目录。
 
 ---
 
@@ -247,7 +297,7 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
 
 ### 阶段 1 · 接入 box3d（不碰引擎集成）
 
-- [ ] **1.1 加 submodule 并 pin tag**
+- [x] **1.1 加 submodule 并 pin tag**
   - 命令：`git submodule add -b main https://github.com/erincatto/box3d.git third_party/box3d`
   - 文件：`.gitmodules`（确认 `branch = main` 写进去了）、根 `CMakeLists.txt`
     （加进那个 submodule 存在性检查的 `foreach`）
@@ -255,7 +305,7 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
   - 升级的规矩（写进交接区，以后照做）：`git submodule update --remote third_party/box3d`
     → 跑 `physics_smoke` 和端到端验收 → 指针单独一个 `chore(deps)` commit。
 
-- [ ] **1.2 挂进构建**
+- [x] **1.2 挂进构建**
   - 文件：`third_party/CMakeLists.txt`
   - 做法：`add_subdirectory(box3d)` 之前把它自己的开关关掉 —— 至少
     `BOX3D_SAMPLES` / `BOX3D_BENCHMARK` / `BOX3D_UNIT_TESTS` / `BOX3D_DOCS`（**实际名字要看它的
@@ -265,7 +315,7 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
     退路（先别用，SIMD 是它的性能来源）。
   - 验收：`cmake --preset debug` 配置通过，`box3d` target 出现在构建里。
 
-- [ ] **1.3 冒烟测试：让一个盒子在纯 C 的世界里掉下来**
+- [x] **1.3 冒烟测试：让一个盒子在纯 C 的世界里掉下来**
   - 文件：`ArtiEngine/runtime/tests/physics_smoke.cpp`（新建）+ 挂进 `BUILD_TESTING` 分支，
     照 `Tools/asset_tools/CMakeLists.txt` 里 `asset_pipeline_smoke` 的形状写
   - 做法：照 Box3D 的 hello 文档走一遍 ——
