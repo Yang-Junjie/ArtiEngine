@@ -236,7 +236,7 @@ cmake --build --preset debug
 | 场景作为资产 | `.artiscene` 没有 handle、没有 artifact，靠项目根相对路径引用 |
 | rename / delete 感知 | 在文件管理器里改名会让旧 UUID 变孤儿被回收、新文件拿新 UUID，场景引用静默失效。变通办法是连 `.meta` 一起改名 |
 | 非 Windows 平台 | 两处卡住：`ArtiTools::Platform`（文件对话框）只有 Win32 实现；运行时依赖 staging 在非 Windows 上只设 `BUILD_RPATH`、不拷文件，所以产物可搬移性只在 Windows 上验过 |
-| Release 发布验收 | 可搬移性在 Debug 下验的。Debug 产物链的是调试 CRT（`ucrtbased.dll` 等），不可再分发 —— 真要给别人跑得用 Release 构建打包 |
+| 产物自带 CRT | Debug 和 Release 的可搬移性都验过了（clean PATH + 回落路径失效下能渲染），但 Release 产物仍靠三个 VC redist DLL（`MSVCP140` / `MSVCP140_ATOMIC_WAIT` / `VCRUNTIME140`）—— 那不是 Windows 自带的。要么静态链 CRT，要么把它们拷进产物，未定；而 Debug 产物链的调试 CRT 本身就不可再分发，发布只能用 Release |
 | 导入设置 / Extract 的编辑器 UI | `AssetPipeline` 的 `sourceSettings` / `setAuthoredSetting` / `extractMaterial` 都在，但只有 CLI 在调。Content Browser 的预览栏目前只显示状态，不能改设置 |
 | 打包的编辑器入口 | 没有「Build」菜单项，只有 `asset_tools pack` |
 

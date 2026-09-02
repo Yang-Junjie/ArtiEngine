@@ -156,5 +156,7 @@ Vulkan SDK、也没有源码树的机器上能直接跑。
 两个还欠着的：
 
 - **`pack` 只有 CLI 一条路**，编辑器里没有「Build」菜单项。
-- **Debug 产物不能给别人跑**：它链的是调试 CRT（`ucrtbased.dll` / `MSVCP140D.dll` /
-  `VCRUNTIME140D.dll`），那几个不可再分发。要发布就用 Release 构建打包。
+- **发布只能用 Release 构建**：Debug 产物链的是调试 CRT（`ucrtbased.dll` /
+  `MSVCP140D.dll` / `VCRUNTIME140D.dll`），那几个不可再分发。Release 产物已经验过（clean PATH
+  加回落路径失效下能渲染），但它还靠三个 VC redist DLL（`MSVCP140` /
+  `MSVCP140_ATOMIC_WAIT` / `VCRUNTIME140`）—— 那不是 Windows 自带的。要不要自带 CRT 未定。

@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 已完成（待 push）|
+| **状态** | 阶段 0～5 完成；阶段 6（Release 验收）卡在 6.5 等拍板 |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（本仓库）、ArtiRenderer（submodule）、ArtiChoco（ArtiRenderer 的 submodule） |
@@ -14,11 +14,16 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：**全部完成**（阶段 0～5 共 24 步全部打勾）。端到端验收通过：clean PATH +
-两条回落路径改名失效的情况下，打包产物跑出 `First frame rendered (4 draw calls)` 并干净退出。
+**当前进度**：阶段 0～5 全部完成并本地提交（见 5.3）。**阶段 6（Release 发布验收）追加在阶段 5
+之后，6.1～6.4 已过**，Release 产物在 clean PATH + 两条回落路径失效的情况下跑出
+`First frame rendered (4 draw calls)` 并干净退出。
 
-**下一步**：只剩 **push**（三层，由内向外，见 5.3）。推送是对外动作，等用户点头。
-除此之外这份任务没有遗留项。
+**下一步**：**6.5 等用户拍板** —— Release 产物还依赖三个 VC redist DLL
+（`MSVCP140.dll` 0.61 MB / `MSVCP140_ATOMIC_WAIT.dll` 0.06 MB / `VCRUNTIME140.dll` 0.17 MB），
+本机 System32 里有，所以 6.4 过了；但那不等于任何机器都行 —— 它们靠 VC++ Redistributable，
+不是 Windows 自带（`MSVCP140_ATOMIC_WAIT.dll` 尤其新，老版本 redist 里没有）。
+两条路（静态链 CRT / 随产物拷 redist）的取舍写在 6.5 里，**不要自己选**。
+6.5 定了才做 6.6，然后 push（三层，见 5.3）。
 
 **做完之后的事实**（下一个人可以直接依赖这些）：
 
@@ -513,6 +518,73 @@ D1～D5 全部已定。执行时如果发现某条行不通，**先在交接区�
     ```
 
 ---
+### 阶段 6 · Release 发布验收（阶段 5 之后追加）
+
+阶段 5 的可搬移性是在 **Debug** 下验的，而 Debug 产物不可发布：它链调试 CRT
+（`ucrtbased.dll` / `MSVCP140D.dll` / `VCRUNTIME140D.dll`），那几个不在可再分发范围里，
+本机能跑只是因为 System32 里装了。所以「可发布产物」这个交付物还没在它真正的用途上证明过。
+
+这一阶段**先测量再决定**：CRT 怎么处理（静态链 `/MT` 还是随产物拷 redist）是个要拍板的
+取舍，但只有在 Release 产物真的缺 CRT 时才需要拍 —— 所以 6.1～6.4 先跑完再看。
+
+- [x] **6.1 Release 构建**
+  - 命令：`cmake --preset release && cmake --build --preset release`（产物在 `build-release/`）
+  - 验收：`build-release/bin/` 下有三个 exe，且 staging 拷到位 —— DLL 应该是**不带 d** 的
+    （`SDL3.dll` / `slang.dll` / `slang-compiler.dll`），加 `shaders/`（13 个）和 `resources/`。
+    这一条同时验证了 4.2 里「DLL 按通配拷、不硬编码文件名」在 Release 下也成立。
+  - 结果：`build-release/bin/` 里的 DLL 恰好是不带 d 的那一套：`SDL3.dll` / `slang.dll` /
+    `slang-compiler.dll`，加 `shaders/`（13）和 `resources/`。“DLL 按通配拷、不硬编码”在
+    Release 下成立。
+
+- [x] **6.2 看 Release 产物到底依赖什么**
+  - 命令：`llvm-readobj --coff-imports build-release/bin/arti_player.exe | sed -n 's/^ *Name: *//p' | sort -u`
+  - 做法：把导入表抄进交接区，重点看 CRT 那几个（`msvcp140` / `vcruntime140` /
+    `vcruntime140_1` / `api-ms-win-crt-*`）以及有没有意外的新依赖。
+  - 验收：交接区里有这份清单。
+  - 结果：非 OS 依赖只剩 **三个 VC redist DLL**：`MSVCP140.dll`（0.61 MB）、
+    `MSVCP140_ATOMIC_WAIT.dll`（0.06 MB）、`VCRUNTIME140.dll`（0.17 MB）。其余都不用担心：
+    `api-ms-win-crt-*`（UCRT，Win10+ 自带）、`vulkan-1.dll`（显卡驱动装的）、
+    `KERNEL32` / `USER32` / `SHELL32` / `IMM32`。Debug 下那个 `VCRUNTIME140_1D.dll` 在
+    Release 导入表里没有。
+
+- [x] **6.3 clean PATH 下打包**
+  - 命令：`build-release/bin/asset_tools.exe pack projects/projects.artiproj <out> --overwrite`
+  - 验收：exit 0，产物里 `*.dll` 是不带 d 的那一套，`shaders/` 13 个，`arti_player.exe` 在。
+  - 结果：clean PATH 下 exit 0，`Packed 9 asset(s), 12 artifact(s), 1 scene(s),
+    17 runtime file(s)`；产物里的 DLL 是不带 d 的三个，shaders 13 个，`arti_player.exe` 在。
+    产物总大小 121 MB（其中 `slang-compiler.dll` 21.9 MB、`SDL3.dll` 3.6 MB）。
+
+- [x] **6.4 把回落路径改名，clean PATH 跑产物**
+  - 做法：照 5.1 的办法 —— 改名 `ArtiRenderer/ArtiRenderer/src/shaders` 和 `Tools/resources`，
+    `$env:PATH` 只留 `C:\Windows\system32;C:\Windows`，跑产物的 `arti_player.exe --stats`，
+    用 `$p.CloseMainWindow()` + `WaitForExit()` 让它干净退出（否则 spdlog 的缓冲丢日志）。
+  - 验收：日志里有 `Loading shaders from '<out>\shaders' (staged next to the executable)` 和
+    `First frame rendered (N draw calls)`，exit 0，无 error。**做完把两个目录改回来。**
+  - 结果：**通过。** 两条回落路径改名失效 + PATH 只剩 `C:\Windows\system32;C:\Windows`，
+    日志：`Loading shaders from 'H:	mprtipack-rel\shaders' (staged next to the executable)`
+    → `First frame rendered (4 draw calls)` → `ArtiChoco stopped`，干净退出 exit 0，无 error。
+    回落路径已恢复。
+
+- [ ] **6.5 判定 CRT 要不要处理**
+  - 做法：6.4 过了说明**本机**的 System32 已经提供了 Release CRT。但那不等于「任何机器都行」
+    —— `msvcp140.dll` / `vcruntime140*.dll` 靠 VC++ Redistributable，不是 Windows 自带。
+    所以这一步的产出是一个判断，不是一次运行：产物要不要自带 CRT。
+  - 两条路（**需要用户拍板，不要自己选**）：
+    - **静态链 CRT**（`/MT`）—— 产物零 CRT 依赖，最干脆；代价是二进制变大，而且所有 target
+      得统一（混用 `/MT` 和 `/MD` 会在链接期或运行期炸）。注意本项目用 clang 走 MSVC ABI，
+      要确认 `CMAKE_MSVC_RUNTIME_LIBRARY` 在这条工具链上生效。
+    - **随产物拷 redist DLL** —— 改动小（`InstallRequiredSystemLibraries` 或手动指路），
+      但多三个文件，而且要跟着 VS 版本走。
+  - 验收：交接区里记下选了哪条和理由；如果选了要动手，另开一份任务文档。
+
+- [ ] **6.6 回写文档**
+  - 文件：`docs/Architecture/README.md`（§7「明确未做」里的「Release 发布验收」一条）、
+    `docs/Architecture/Applications.md`（§5 末尾那条 Debug 提醒）
+  - 做法：按 6.4 的结果订正。如果 6.5 决定要自带 CRT，那条改成指向新任务而不是删掉。
+  - 验收：文档和实际行为一致。
+
+---
+
 
 ## 端到端验收
 
