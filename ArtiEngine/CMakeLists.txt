@@ -70,6 +70,19 @@ target_link_libraries(artiengine_runtime
 
 set_target_properties(artiengine_runtime PROPERTIES FOLDER "ArtiEngine")
 
+if(BUILD_TESTING)
+    # 只链 box3d，不链 artiengine_runtime：这个测试的意义就是在碰引擎之前先确认库本身是通的，
+    # 后面物理出问题就不用怀疑到这一层。它也是 submodule 跟 main 的对冲 —— `git submodule
+    # update --remote` 之后第一个报警的应该是它。
+    add_executable(physics_smoke runtime/tests/physics_smoke.cpp)
+    target_compile_features(physics_smoke PRIVATE cxx_std_20)
+    target_link_libraries(physics_smoke PRIVATE box3d)
+    set_target_properties(physics_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
+    add_test(NAME physics_smoke COMMAND physics_smoke)
+    # 不用 stage Vulkan SDK：它一个 DLL 都不链。CRT 那套还是要的，和 asset_pipeline_smoke 一样。
+    artichoco_stage_msvc_runtime(physics_smoke)
+endif()
+
 # ImGui 宿主单独一个 target：它要链 SDL 和 imgui 的 SDL3 后端，不该让核心库的下游都背上。
 # ArtiRenderer 不链 Platform/SDL，所以这部分只能待在引擎层。
 add_library(artiengine_imgui STATIC

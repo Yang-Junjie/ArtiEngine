@@ -25,6 +25,7 @@ foreach(_arti_required_submodule
     "${ARTIENGINE_ARTIRENDERER_DIR}/ArtiChoco/CMakeLists.txt"
     "${ARTIENGINE_ARTIRENDERER_DIR}/third_party/imgui/imgui.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ImGuizmo/src/ImGuizmo.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/box3d/CMakeLists.txt"
 )
     if(NOT EXISTS "${_arti_required_submodule}")
         message(FATAL_ERROR
