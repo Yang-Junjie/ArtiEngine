@@ -236,7 +236,7 @@ cmake --build --preset debug
 | --- | --- |
 | Windows 10+ x64 | UCRT（`api-ms-win-crt-*` / `ucrtbase.dll`）是系统自带的；更老的 Windows 要额外装 UCRT 更新 |
 | 支持 **Vulkan 1.3** 的显卡驱动 | `deviceScore()` 里 `apiVersion < VK_API_VERSION_1_3` 直接返回 0，达不到就抛 `No Vulkan device supports graphics, presentation, and swapchains`。Vulkan 1.3 是 2022 年初发布的，所以实际门槛是驱动别太旧 |
-| 产物目录可写 | `logs/ArtiChoco.log` 建在 exe 旁边，建不出来会让进程直接以失败退出 —— 解压到 `C:\Program Files\...` 之类只读位置起不来 |
+| （不再是硬要求）产物目录可写 | `logs/ArtiChoco.log` 建在 exe 旁边，但**建不出来只警告、不再阻止启动**。只读安装（`C:\Program Files\...`）能跑，只是日志只在控制台 |
 
 `vulkan-1.dll` 由显卡驱动提供，刻意不随产物走。
 
@@ -263,7 +263,7 @@ cmake --build --preset debug
 | rename / delete 感知 | 在文件管理器里改名会让旧 UUID 变孤儿被回收、新文件拿新 UUID，场景引用静默失效。变通办法是连 `.meta` 一起改名 |
 | 非 Windows 平台 | 两处卡住：`ArtiTools::Platform`（文件对话框）只有 Win32 实现；运行时依赖 staging 在非 Windows 上只设 `BUILD_RPATH`、不拷文件，所以产物可搬移性只在 Windows 上验过 |
 | 真实干净机器的验收 | Debug / Release 的可搬移性都验过（clean PATH + 回落路径失效下能渲染），CRT 也确认加载的是产物里那一份。但没在一台真正没装 VC++ Redistributable / 没装 Vulkan 驱动的机器上跑过 |
-| 日志路径 | `logs/ArtiChoco.log` 固定建在 exe 旁边，且建不出来就让进程失败退出。装在只读位置的产物起不来 —— 该降级成「只输出到控制台」或改写 `%LOCALAPPDATA%` |
+| 只读位置不留日志文件 | `logs/ArtiChoco.log` 固定建在 exe 旁边。建不出来**不再致命**（降级成只输出控制台并警告一次），但装在只读位置时就没有日志文件可查。要让那种安装也留日志，得改成写 `%LOCALAPPDATA%` —— 那会挑走开发期习惯的位置，是另一个决定 |
 | 播放器是 console 子系统 | 双击会多开一个黑框；失败信息只在那个控制台和日志里，没有弹窗，所以驱动不达标的人看到的是一闪而过的黑框 |
 | 发布只能用 Release | Debug 产物链的调试 CRT（`ucrtbased.dll` 等）不可再分发，而 staging 拷的是 redist 里的 release CRT。目前没有机制防止用 Debug 构建去 pack |
 | 导入设置 / Extract 的编辑器 UI | `AssetPipeline` 的 `sourceSettings` / `setAuthoredSetting` / `extractMaterial` 都在，但只有 CLI 在调。Content Browser 的预览栏目前只显示状态，不能改设置 |
