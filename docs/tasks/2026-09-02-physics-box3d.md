@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 进行中（阶段 1 完成；阶段 2 只差一处肉眼验收） |
+| **状态** | 进行中（阶段 1、2 完成） |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（全部改动都在这里；ArtiRenderer / ArtiChoco 不动） |
@@ -14,8 +14,8 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：**阶段 1 完成**，**阶段 2 代码写完**（2.1 / 2.2 验收过了；2.3 的面板只肉眼看了
-Collider 那半边，见下面「2.3 还差什么」）。阶段 3～5 未动。
+**当前进度**：**阶段 1、2 完成**（2.1～2.3 各自的验收都过了；2.3 那两节面板由用户在编辑器里
+肉眼确认）。阶段 3～5 未动。
 
 - box3d 在 `third_party/box3d`，指针 `47d7f7c`（`v0.1.0-21-g47d7f7c`），`.gitmodules` 里有 `branch = main`。
 - `third_party/CMakeLists.txt` 里 `add_subdirectory(box3d)`；`box3d` target 建得出来，产物是
@@ -23,8 +23,7 @@ Collider 那半边，见下面「2.3 还差什么」）。阶段 3～5 未动。
 - `ArtiEngine/runtime/tests/physics_smoke.cpp` + `ArtiEngine/CMakeLists.txt` 的 `BUILD_TESTING` 分支。
   `ctest` 两个测试都过（`physics_smoke` 0.01s、`asset_pipeline_smoke` 0.44s）。
 - 1.1 那条的标题还写着「并 pin tag」，是 D1 被改写之前的残留，正文（`git submodule add -b main`）是对的。
-- 阶段 1 两个 commit 已提交（`feat(physics): 接入 box3d …` + `docs(tasks): 物理阶段 1 收工 …`），
-  **还没 push**。阶段 2 的改动还在工作区。
+- 阶段 1、2 都已提交（三个 commit），**还没 push**。
 
 **阶段 2 的实际形状**（组件字段名后面 3.2 建 shape 时要一一对上）：
 
@@ -38,13 +37,8 @@ Collider 那半边，见下面「2.3 还差什么」）。阶段 3～5 未动。
   `Radius` / `HalfHeight` / `Density` / `Friction` / `Restitution`），**枚举按名字写不按数字**
   （老场景插一项枚举也不会让值悄悄变成另一种；名字不认识时退回默认值，和缺键一样处理）。
 
-**2.3 还差什么**：面板已经在编辑器里跑起来了 —— 给 Cube 加上两个组件之后 Collider 那节显示
-正确（Shape 下拉 = Box、Half Extents 三个 0.500、Density 1.00 / Friction 0.30 / Restitution 0.00）。
-**没肉眼过的是 Rigid Body 那三行、以及把 Shape 切到 Sphere / Capsule 时尺寸行会不会跟着换。**
-（那扇窗口当时正被用户自己点着，我没抢焦点。）
-
-**下一步**：把上面那两条看一眼、2.3 打勾，然后进阶段 3.1 —— 新建
-`ArtiEngine/runtime/physics_system.{h,cpp}`，`artiengine_runtime` 链 `box3d`。
+**下一步**：阶段 3.1 —— 新建 `ArtiEngine/runtime/physics_system.{h,cpp}`，挂进
+`artiengine_runtime` 的源文件列表并让它链 `box3d`。
 
 **阶段 1 要确认的三件事 —— 已确认**（都是从 `third_party/box3d/include/box3d/` 的头里读出来的，
 不是从文档抄的）：
@@ -399,7 +393,7 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
     `typeName()`：`artiengine.rigid_body` / `artiengine.collider`，写无条件、读容忍缺失）
   - 验收：加了组件的场景存盘后重新打开，值还在；老场景（没有这两个组件）照常加载。
 
-- [x] **2.3 Inspector** ← 进行中：Rigid Body 那三行和「切形状换尺寸行」还没肉眼过
+- [x] **2.3 Inspector**
   - 文件：`Tools/scene_editor/src/panels/inspector_panel.cpp`（+ 头文件里两个 `draw...` 声明）
   - 做法：body 一个类型下拉 + 两个字段；collider 一个形状下拉 + 尺寸 + 三个材质字段。
     形状切换时只显示该形状用到的尺寸字段（盒子三个半长、球一个半径、胶囊半径 + 半高）。
