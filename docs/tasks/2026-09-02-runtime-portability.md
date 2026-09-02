@@ -25,6 +25,14 @@
 exe 所在目录的搜索优先级高于 System32，而这几个 DLL 都不是 KnownDLLs。要真验就得找一台干净
 的虚拟机。
 
+**事后修过一个本任务引入的回归**（2026-09-02，在级联阴影任务里撞上的）：
+`artirenderer_stage_shaders()` 当时用的是 POST_BUILD，而 POST_BUILD 只在 target 重新链接时才跑。
+改一个 `.slang` 不会导致重链（shader 是 `HEADER_FILE_ONLY` 源文件），于是 `build/bin/shaders/`
+里那份会悄悄变旧 —— 而本任务刚把运行时改成**优先用它**。表现是「改了 shader 却没生效」，
+很容易被误判成 Slang 缓存问题。已改成 stamp + `add_custom_target` + 把 shader 文件列成显式
+`DEPENDS`：`touch` 一个 `.slang` 后 `cmake --build` 会重新 Staging，不需要重链。见
+[2026-09-02-directional-csm.md](2026-09-02-directional-csm.md) 的交接区。
+
 **做完之后的事实**（下一个人可以直接依赖这些）：
 
 - `core::executableDir()` 在 `ArtiChoco/artichoco/core/io/paths.h`，Windows / Linux 有实现。

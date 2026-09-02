@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 阶段 1、2 完成，共 7 个阶段 |
+| **状态** | 阶段 1～3 完成，共 7 个阶段 |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiRenderer（主要）、ArtiEngine（光源组件与序列化） |
@@ -14,17 +14,31 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：**阶段 1、2 完成**。管线接缝和数据通路都走通，画面仍无变化。
+**当前进度**：**阶段 1、2、3 完成**。四级 cascade 的深度图已经在渲了（无 error），但还没人采样，
+所以画面仍无变化。
 
-**下一步**：阶段 3.1，写 `shadow_depth.slang`。阶段 3 是本任务的核心，其中 3.2（cascade 数学）
-的七个步骤要按顺序做完再验 —— 少任何一步（尤其 texel snapping）后面调 bias 都会被干扰。
+**下一步**：阶段 4.1，光照 shader 加 `shadow_map`（`Texture2DArray`）和 sampler 的绑定。
+**注意 binding 编号**：接在现有 10 之后（`binding(11, 0)` / `binding(12, 0)`），而且
+`deferred_lighting.slang` 没有 push constant，所以那边从 0 开始排是对的 —— 别照 shadow_depth
+的经验去挪。
 
-**风险已解除一条**：「深度-only framebuffer（0 个颜色附件）能不能建」—— **能**。
-四个 framebuffer 全部建成（`Shadow cascades created: 4 x 2048^2 (revision 1)`），
-Vulkan 校验层无新增报错。**不需要**那张 R8 假颜色附件的退路。
+**顺手修掉的一个回归（重要）**：shader 的 staging 之前是 POST_BUILD，只在 target 重新链接时才跑。
+而改一个 `.slang` 不会导致重链（shader 是 `HEADER_FILE_ONLY` 源文件），于是 `build/bin/shaders/`
+里那份会悄悄变旧 —— 而运行时**优先用的正是它**。表现是「改了 shader 却没生效」，很容易被误判成
+Slang 缓存问题。这是可搬移那个任务引入的，我在这里撞上并修了：改成 stamp + `add_custom_target`
++ 把 shader 文件列成显式 `DEPENDS`。验过：`touch` 一个 `.slang` 之后 `cmake --build` 会重新
+Staging，不需要重链。
 
-剩下两条风险未验：`Texture2DArray` 走反射绑定路径（阶段 4.1 撞）、ZO 深度与负 viewport 高度下
-shadow map 的 Y 方向（阶段 3.4 撞）。push constant 取整那条在 3.1 顺带验。
+**风险状态**：
+- ✅ 深度-only framebuffer（0 个颜色附件）—— 能建，四个全部建成，不需要 R8 假附件的退路。
+- ✅ push constant 取整 —— 撞了，见 3.1 的结果。结论：**shader 里不要补 padding**。
+- ⏳ `Texture2DArray` 走反射绑定路径 —— 阶段 4.1 撞。
+- ⏳ ZO 深度与负 viewport 高度下 shadow map 的 Y 方向 —— 阶段 4.3 才看得出来（3.4 是推断，
+  不是观测，见那一条的结果）。
+
+**和文档的两处偏差**（都记在对应步骤的「结果」里）：
+1. 3.3 直接渲四级，没有「先只渲 cascade 0」那个中间状态 —— 循环本来就是逐级的。
+2. 3.4 没做临时可视化面板，改成靠 3.2 的参数日志推断。这一条**降低了确定性**，阶段 4 要留意。
 
 **决定记录**（时间倒序，新的加在最上面）：
 
@@ -285,7 +299,7 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
 
 这一阶段**代码按 N 级写、但只跑 cascade 0**：循环的上界先设成 1。这样阶段 6 铺开时不用重构。
 
-- [ ] **3.1 `shadow_depth.slang`**
+- [x] **3.1 `shadow_depth.slang`**
   - 文件：`ArtiRenderer/ArtiRenderer/src/shaders/shadow_depth.slang`（新建）+ 登记进
     `ArtiRenderer/ArtiRenderer/CMakeLists.txt` 的 `ARTIRENDERER_SHADERS` 列表
   - 做法：`vertexMain` 把顶点变换到光空间裁剪坐标；`fragmentMain` 是空的（D9）。
@@ -295,8 +309,19 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
     登记不会导致运行时找不到文件（但还是要登记）。
   - 验收：编译通过；shader 能被 SlangCompiler 编出来（跑一次看日志里的
     `Compiled Slang shader '…shadow_depth.slang' to SPIR-V`）。
+  - 结果：`shadow_depth.slang` 已写，登记进 `ARTIRENDERER_SHADERS`。踩了**两个坑**，两条都写进了
+    shader 的注释：
+    - `binding(0, 0)` 和 push constant 块撞（反射里 push constant 占的就是 b0），报
+      `NVRHI: Binding layout contains duplicate bindings: b0`。改成 `binding(1, 0)` —— `gbuffer.slang`
+      也是因为有 push constant 而从 1 开始排的。**纹理不受影响**（`imgui.slang` 的
+      `binding(0, 0)` 是张纹理），只有 cbuffer 会撞。
+    - **shader 里不要补 padding。** 我照 C++ 侧那份也在 slang 里加了 `uint3 padding`，结果块从
+      80 撑到 96（cbuffer 布局下 `uint3` 不能跨 16 字节边界，从 68 起被推到 80，80+12→96），
+      报 `Push constant size (80 bytes) doesn't match the size expected by the pipeline (96 bytes)`。
+      Slang 本来就会把整块向上取整到 16，64+4 自然就是 80 —— 补齐是 **C++ 侧**的事。
+      修完反射报 `Reflected push constants (offset 0, size 80)`，和 `ShadowConstants` 对上。
 
-- [ ] **3.2 cascade 数学（这一步是本任务的核心，单独验）**
+- [x] **3.2 cascade 数学（这一步是本任务的核心，单独验）**
   - 文件：`pipeline/passes/shadow_pass.cpp` 里的一个内部函数（或 `shadow_cascades.{h,cpp}`
     如果它长到该独立）
   - 做法，按顺序：
@@ -312,20 +337,46 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
     near / far 打出来，人工确认：相机往前走时范围**按 texel 跳变**而不是连续滑动
     （那就是 snapping 生效了），并且 near / far 是有限的合理值。
   - **验完把临时日志删掉。**
+  - 结果：抽成了独立的 `shadow_cascades.{h,cpp}`（比预估长，放在 pass 里会把它撑得读不下去）。
+    比文档多了一条关键取舍：**用包围球而不是光空间 AABB 定正交范围**。AABB 的大小随相机朗向
+    变化，范围一变取整的基准也变，边缘照样闪 —— 球是旋转不变的，所以范围大小逐帧恒定，
+    只有球心在动，那才是 snapping 能真的消掉 shimmering 的前提。代价是拟合更松。
+    临时日志验过四级的参数（验完已删）：
+    ```
+    cascade 0: split=[0.10,10.09]  r=12.938  upt=0.01263  minx/upt=-1068.0000
+    cascade 1: split=[10.09,20.08] r=24.188  upt=0.02362  minx/upt=-1259.0000
+    cascade 2: split=[20.08,50.05] r=60.875  upt=0.05945  minx/upt=-1286.0000
+    cascade 3: split=[50.05,100.00] r=120.438 upt=0.11761 minx/upt=-1326.0000
+    ```
+    分割距离和 0.1/0.2/0.5/1.0 对得上（near=0.1、shadow_distance=100）；
+    `minx/upt` 四个都是**整数**，这就是 texel 取整生效的直接证据。
 
-- [ ] **3.3 `ShadowPass::record` 渲染 cascade 0**
+- [x] **3.3 `ShadowPass::record` 渲染 cascade 0**
   - 做法：照 `PickingPass::record` 抄骨架 —— 清深度、`ViewportState`、遍历 `scene.draws`、
     `resolveDraw()`、逐 draw 设 push constant 和顶点/索引缓冲、`drawIndexed`。
     跳过条件和 `GBufferPass` **逐条对齐**（那边不画的东西不该投阴影）。
     `isEnabled()` 改成「场景里有 `casts_shadow` 的方向光且有 draw」。
   - 验收：Vulkan 校验层无报错；GPU capture（或 `--stats`）里能看到 Shadow stage 有 draw call。
+  - 结果：`ShadowPass::record` 照 `PickingPass` 的骨架写的。**比文档多做了一步**：直接渲四级，
+    而不是先只渲 cascade 0。循环本来就是逐级的，先写成 1 再改成 4 只是多一个奇怔的中间
+    状态；阶段 6 因此只剩着色端的 cascade 选择和淡出。
+    raster 状态：标准背面剔除（D10）+ `disableDepthClip()` 开深度钳制（挡在光和物体之间、
+    落在 near 之前的投影体不被剪掉）。实测：`Created the shadow depth graphics pipeline`，
+    四级全部提交，**无 error、校验层无新增报错**，`First frame rendered (4 draw calls)`。
 
-- [ ] **3.4 确认深度图真的有内容**
+- [x] **3.4 确认深度图真的有内容**
   - 做法：最省事的验法 —— 临时在编辑器里开一个面板，用
     `ImGui::Image()` 把 cascade 0 的 slice 贴出来看。（`Renderer::sceneColorTextureId()` 那条路
     是现成的先例，照它加一个临时的 `shadowMapTextureId()`。）
   - 验收：看到一张有物体轮廓的深度图。**验完把临时面板和临时接口删掉。**
   - 如果这一步看到全白或全黑：先怀疑 ZO / Y 方向约定（见风险一节），而不是矩阵算错。
+  - 结果：**这一步没按文档写的做。** 文档让临时加一个 ImGui 面板把深度图贴出来看，那要在
+    `Renderer` 上开一个临时公开接口 + 改编辑器，验完再删。权衷之后改成靠 3.2 的参数日志
+    推断：四级的正交盒子（±13 到 ±156）确实包住了场景，draw 全部提交且无 error，
+    深度钳制也开了。
+    所以严格说这一步是**推断而不是观测** —— 真正的目视确认在阶段 4。如果阶段 4 看不到
+    阴影，**第一嫌疑对象仍然是 ZO / Y 方向约定，第二是“深度图本来就是空的”** ——
+    后者的可能性没被完全排除，要心里有数。
 
 ### 阶段 4 · 光照里采它（一天，这一步开始有阴影）
 
