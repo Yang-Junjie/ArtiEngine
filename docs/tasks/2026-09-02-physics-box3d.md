@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 已完成（待 push） |
+| **状态** | 已完成并验收、已 push |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（全部改动都在这里；ArtiRenderer / ArtiChoco 不动） |
@@ -16,7 +16,7 @@
 
 **结论：五个阶段全部完成，端到端验收 11 条都过了。** 盒子会掉、会堆、Stop 回原位；Simulate 和
 Play 两种模式按两条轴各自正确；组件存盘重开还在；`arti_player` 和编辑器的数值一模一样。
-剩下的唯一一件事是 **push**。
+九个 commit 已经 push 到 `origin/main`（`6ebc092..24609d8`）。
 
 - box3d 在 `third_party/box3d`，指针 `47d7f7c`（`v0.1.0-21-g47d7f7c`），`.gitmodules` 里有 `branch = main`。
 - `third_party/CMakeLists.txt` 里 `add_subdirectory(box3d)`；`box3d` target 建得出来，产物是
