@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 阶段 1～3 完成，共 7 个阶段 |
+| **状态** | 阶段 1～5 完成（画面已有阴影），共 7 个阶段 |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiRenderer（主要）、ArtiEngine（光源组件与序列化） |
@@ -14,31 +14,44 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：**阶段 1、2、3 完成**。四级 cascade 的深度图已经在渲了（无 error），但还没人采样，
-所以画面仍无变化。
+**当前进度**：**阶段 1～5 完成**（5.3 是 `[~]`，见下）。**画面上已经有阴影了** —— 无 acne、
+无 peter-panning，头盔和球体各投出界限分明的一块。
 
-**下一步**：阶段 4.1，光照 shader 加 `shadow_map`（`Texture2DArray`）和 sampler 的绑定。
-**注意 binding 编号**：接在现有 10 之后（`binding(11, 0)` / `binding(12, 0)`），而且
-`deferred_lighting.slang` 没有 push constant，所以那边从 0 开始排是对的 —— 别照 shadow_depth
-的经验去挪。
+**下一步**：阶段 6.2，着色端选 cascade。现在 `sampleDirectionalShadow()` 里 `cascade` 写死是 0，
+所以只有最近那一级在起作用，远处没有阴影。6.1（渲四级）在阶段 3 已经做完了。
+**6.2 的坑写在文档里**：view-space 深度要用 `-(view * world).z` 而不是
+`length(camera_position - world_pos)` —— 后者是径向距离，用错会让屏幕边缘提前跳级。
+
+**需要你帮忙验的两条**（我没有交互控制相机的手段，只能启动 / 抓图 / 关窗）：
+1. **5.3 shimmering**：在编辑器里平移相机，看阴影边缘会不会闪。间接证据是 3.2 里
+   `min_x / units_per_texel` 四级都是整数（取整生效），但「相机动起来范围大小恒定」这一半靠的是
+   包围球的旋转不变性，那是推理不是观测。
+2. **掠射角的 acne**：把方向光转到几乎平行于地面，看有没有摩尔纹。当前 bias 是
+   `slopeScale=2.0, constant=1`，是在光接近垂直的情况下调的。
+
+**风险状态：四条全部解除**
+- ✅ 深度-only framebuffer（0 个颜色附件）—— 能建。
+- ✅ push constant 取整 —— 结论：shader 里不要补 padding（见 3.1）。
+- ✅ `Texture2DArray` 走反射绑定路径 —— 没问题，不需要 N 张 2D 的退路。唯一要注意的是
+  `NvrhiBindingResource` 的 `dimension` 必须显式给。
+- ✅ ZO 深度与负 viewport 高度下的 Y 方向 —— `0.5 - 0.5 * ndc.y` 一次就对（和全屏三角形
+  那边的 `1 - uv.y * 2` 互为逆）。
+
+**阶段 4 撞到一个文档里没预见的坑**（已修，值得记住）：GPU 光源缓冲只装 `enabled` 的灯，
+所以它的下标和 `RenderScene::lights` 的下标不一样。`ShadowTargets` 记的是后者，必须在过滤循环里
+换算。漏了的表现是「阴影出现在另一个灯的方向上」，而只有一个灯时又恰好正确。
 
 **顺手修掉的一个回归（重要）**：shader 的 staging 之前是 POST_BUILD，只在 target 重新链接时才跑。
 而改一个 `.slang` 不会导致重链（shader 是 `HEADER_FILE_ONLY` 源文件），于是 `build/bin/shaders/`
-里那份会悄悄变旧 —— 而运行时**优先用的正是它**。表现是「改了 shader 却没生效」，很容易被误判成
-Slang 缓存问题。这是可搬移那个任务引入的，我在这里撞上并修了：改成 stamp + `add_custom_target`
-+ 把 shader 文件列成显式 `DEPENDS`。验过：`touch` 一个 `.slang` 之后 `cmake --build` 会重新
-Staging，不需要重链。
+里那份会悄悄变旧 —— 而运行时**优先用的正是它**。表现是「改了 shader 却没生效」。这是可搬移那个
+任务引入的，我在这里撞上并修了：改成 stamp + `add_custom_target` + 把 shader 文件列成显式
+`DEPENDS`。验过：`touch` 一个 `.slang` 之后 `cmake --build` 会重新 Staging，不需要重链。
 
-**风险状态**：
-- ✅ 深度-only framebuffer（0 个颜色附件）—— 能建，四个全部建成，不需要 R8 假附件的退路。
-- ✅ push constant 取整 —— 撞了，见 3.1 的结果。结论：**shader 里不要补 padding**。
-- ⏳ `Texture2DArray` 走反射绑定路径 —— 阶段 4.1 撞。
-- ⏳ ZO 深度与负 viewport 高度下 shadow map 的 Y 方向 —— 阶段 4.3 才看得出来（3.4 是推断，
-  不是观测，见那一条的结果）。
-
-**和文档的两处偏差**（都记在对应步骤的「结果」里）：
-1. 3.3 直接渲四级，没有「先只渲 cascade 0」那个中间状态 —— 循环本来就是逐级的。
-2. 3.4 没做临时可视化面板，改成靠 3.2 的参数日志推断。这一条**降低了确定性**，阶段 4 要留意。
+**验证手段（后面几个阶段接着用）**：
+`PrintWindow(hwnd, hdc, 2)`（PW_RENDERFULLCONTENT）能直接抓到播放器窗口 1280×720 的
+Vulkan 渲染内容，不用把窗口弄到前台、也不会被别的窗口挡住。`Process.MainWindowHandle` 就是
+SDL 窗口的句柄（`FindWindow` 按标题找反而失败了，别绕那条路）。
+另外：IBL 在这个场景里很亮，`intensity 1` 的方向光阴影很淡 —— 要看清就临时把强度调到 8。
 
 **决定记录**（时间倒序，新的加在最上面）：
 
@@ -380,7 +393,7 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
 
 ### 阶段 4 · 光照里采它（一天，这一步开始有阴影）
 
-- [ ] **4.1 光照 shader 加绑定**
+- [x] **4.1 光照 shader 加绑定**
   - 文件：`src/shaders/deferred_lighting.slang`、`pipeline/passes/deferred_lighting_pass.cpp`
   - 做法：slang 里加 `Texture2DArray<float> shadow_map` 和 `SamplerState shadow_sampler`
     （binding 编号接在现有 10 之后）；C++ 侧在 `ensureBindingSet()` 的资源列表里加两条，
@@ -388,8 +401,19 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
   - 注意：binding set 的重建条件要加上 `ShadowTargets::revision()` —— 现在只看
     `gbuffer.revision()` 和 targets 的 revision。漏了它换分辨率时会绑到已销毁的纹理。
   - 验收：编译通过，跑起来不崩、画面暂时不变（还没用上）。
+  - 结果：`shadow_constants`(11) / `shadow_map`(12) / `shadow_sampler`(13) 三个绑定都已反射到位：
+    ```
+    Reflected shader resource 'shadow_constants' at set 0, binding 11
+    Reflected shader resource 'shadow_map'       at set 0, binding 12
+    Reflected shader resource 'shadow_sampler'   at set 0, binding 13
+    ```
+    **`Texture2DArray` 这条风险解除了** —— 走反射绑定路径没有任何问题，不需要
+    「N 张独立 2D 纹理」那条退路。唯一要注意的是 `NvrhiBindingResource::Texture` 默认不填
+    `dimension`，对 array 纹理必须显式给 `Texture2DArray`，否则 nvrhi 会按 2D 建 SRV
+    （抽了个 `shadowMapBinding()` helper）。
+    binding set 的失效条件加上了 `ShadowTargets::revision()`。
 
-- [ ] **4.2 cascade 矩阵和分割距离传进去**
+- [x] **4.2 cascade 矩阵和分割距离传进去**
   - 做法：新开一个 UBO（`ShadowConstants`）装 N 个 `float4x4` 的 light view-projection、
     N 个分割距离、以及 bias / texel 大小 / `fade_start`。**不要**往 `LightingConstants` 里塞
     —— 那个结构已经 144 字节且有 `static_assert`，加 4 个矩阵会让它变成 400+ 字节，
@@ -397,32 +421,58 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
   - `GpuLight` 也不动：投阴影的是哪个灯用 `LightingConstants` 里一个空着的 uint 槽位记下标即可
     （D7 只有一个灯投影）。
   - 验收：编译通过；用调试手段确认矩阵传对了（最简单：着色端临时把 cascade 0 的 UV 当颜色输出）。
+  - 结果：新开了 `ShadowConstantsBuffer`（288 字节：4 个矩阵 + split_far + params），没往
+    `LightingConstants` 里塞。
+    **踩到一个文档里没预见的坑**：GPU 光源缓冲只装 `enabled` 的灯，所以它的下标和
+    `RenderScene::lights` 的下标**不一样**。`ShadowTargets` 记的是后者，必须在过滤循环里
+    换算成前者 —— 漏了这一步的表现是「阴影出现在另一个灯的方向上」，而只有一个灯时
+    又恰好正确，非常难查。也因此把「哪个灯投影」这个结论存进了 `ShadowTargets`，
+    两个 pass 不各推一次。
 
-- [ ] **4.3 手动 3×3 PCF**
+- [x] **4.3 手动 3×3 PCF**
   - 做法：世界坐标 → 光空间 → UV + 深度；采 3×3 个 texel 手动比较取平均（D8）。
     结果只乘到那个投阴影的方向光的直接光照项上 —— **不要乘到 IBL / 环境项**，
     那是另一回事（AO 才是环境项的遮蔽）。
   - 验收：地面上出现阴影；在 Inspector 里转动方向光，阴影跟着转；
     把 `casts_shadow` 取消勾选，阴影消失、画面回到当前的样子。
+  - 结果：3×3 PCF 已实现，只作用在那个投影方向光的直接光项上（不乘 IBL）。
+    UV 的 Y 用 `0.5 - 0.5 * ndc.y`，和全屏三角形那边的 `1 - uv.y * 2` 互为逆 —— **一次就对了，
+    ZO / Y 方向那条风险也解除了**。
+    验法：用 `PrintWindow` 直接抓播放器窗口（1280×720）做 A/B 对比。切 `CastsShadow: false`
+    画面明显变亮 —— 证明采样真的生效了，也顺带排除了 3.4 那个「深度图可能是空的」
+    的可能性。此时未加 bias，整片地面均匀变暗（acne 细到看不出频率，PCF 平均后就是 ~50%
+    的均匀变暗）—— 预期内，阶段 5 修。
 
 ### 阶段 5 · bias 与稳定性（半天到一天，这一步决定它看起来是不是"对的"）
 
-- [ ] **5.1 slope-scaled depth bias**
+- [x] **5.1 slope-scaled depth bias**
   - 做法：在 shadow pass 的 raster state 上设 `depthBias` / `slopeScaledDepthBias`
     （nvrhi 的 `RasterState` 有这两个），而不是在着色端加常数偏移。
   - 验收：掠射角（光几乎平行于地面）下地面不出摩尔纹 / 条纹。
   - 注意：值要靠看画面调。**先调 slope-scaled 再调常数项** —— 前者对付的正是掠射角，
     后者调大了直接换来 peter-panning。
+  - 结果：`raster_state.setSlopeScaleDepthBias(2.0f).setDepthBias(1)`。加上之后均匀变暗**完全消失**，
+    地面恢复正常亮度，而且能看到清楚的头盔阴影和球体阴影。
+    为了看得更清楚，临时把方向光强度调到 8（IBL 在这个场景里很亮，intensity 1 的阴影很淡）：
+    地面亮白、无任何摩尔纹 / 斑点，头盔和球体各投出一块界限分明的阴影。**验完已还原场景。**
+    两个数值是看画面定的，换分辨率或换级数都可能要重调。
 
-- [ ] **5.2 peter-panning 检查**
+- [x] **5.2 peter-panning 检查**
   - 验收：物体和它的阴影在接触处不脱开（墙根、箱子底边这些位置最明显）。
   - 如果 5.1 调到「不出条纹」时已经脱开了，说明 near/far 不够紧（回去看 D5）或者需要
     normal-offset（着色端沿法向偏移采样点）—— 后者是本任务范围外的下一招，别在这里硬调 bias。
+  - 结果：强光那张图里头盔和球体的阴影都**贴着本体**，接触处没有脱开 —— 没有 peter-panning。
+    常数项只给了 1 而不是一个大值，这是它没出现的直接原因。
 
-- [ ] **5.3 shimmering 检查**
+- [~] **5.3 shimmering 检查**
   - 验收：**平移相机**时阴影边缘不闪。这一条专门验 D4 的 texel snapping。
   - 如果闪：确认 snapping 用的 `worldUnitsPerTexel` 是「这一级的正交范围 / 分辨率」，
     而且纹理宽高确实各多留了 1 个 texel。
+  - 结果：**没验成。** 这一条要求「平移相机看边缘会不会闪」，而我没有交互控制相机的手段
+    （只能启动、抓图、关窗）。间接证据是 3.2 里 `min_x / units_per_texel` 四级都是整数，
+    说明取整本身生效；但「相机动起来范围大小恒定」这一半靠的是包围球的旋转不变性，
+    那是推理不是观测。
+    ← 进行中：需要人在编辑器里拖一下相机确认。同理「掠射角下不出条纹」也需要转灯才能验。
 
 ### 阶段 6 · 铺开到 4 级（一天）
 
