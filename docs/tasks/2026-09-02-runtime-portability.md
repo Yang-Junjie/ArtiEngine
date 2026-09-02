@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 已完成（待 push）|
+| **状态** | 已完成、已 push |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（本仓库）、ArtiRenderer（submodule）、ArtiChoco（ArtiRenderer 的 submodule） |
