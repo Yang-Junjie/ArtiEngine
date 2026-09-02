@@ -34,14 +34,14 @@ SDL3 + Vulkan surface，`createHeadlessWindow`（默认）不开窗。
 EditorLayer                    渲染设备、Renderer、ImGuiHost、SceneRenderer，以及下面这些
 ├── EditorProject              打开的项目：AssetPipeline + GPUAssetCache
 │                              两者生命周期都绑在项目上 —— 换项目要重扫 .meta、重传 GPU 资源
-├── EditorContext              World + 选中实体 + Edit/Play 模式 + Play 快照
+├── EditorContext              World + 选中实体 + Edit/Simulate/Play 三态 + 模拟前的快照
 ├── SceneDocument              「哪个场景文件」：新建 / 打开 / 存 / 另存 / 脏标记 / 记住上次
-├── EditorCamera               Edit 模式的相机（Play 模式用场景里的 primary）
+├── EditorCamera               Edit / Simulate 的相机（Play 用场景里的 primary）
 ├── EditorGizmo                ImGuizmo 变换手柄（translate / rotate / scale，local / world）
 └── panels/
     ├── HierarchyPanel         实体树、创建 / 删除 / 改父子
     ├── InspectorPanel         选中实体的组件：Transform / Camera / MeshRenderer /
-    │                          三种光源 / Environment
+    │                          三种光源 / Environment / RigidBody / Collider
     ├── ContentBrowserPanel    Assets/ 树 + 选中项预览
     ├── ProjectSettingsPanel   模态：项目名、StartScene 等
     └── ViewportPanel          场景纹理 + gizmo 覆盖 + 点击 → 拾取 + 资产拖放落点
@@ -66,21 +66,53 @@ EditorLayer                    渲染设备、Renderer、ImGuiHost、SceneRender
 
 拖进 Viewport 时：**prefab** 按节点树生成实体；**mesh** 生成单个实体，材质用 builtin default。
 
-### Edit / Play
+### Edit / Simulate / Play
+
+三种模式的区别只有两条**互相独立**的轴：跑不跑系统、是不是游戏视角。
+
+| | 跑 `World::tick()` | 相机 | gizmo | 调试线（选中轮廓 / 光源线框） |
+| --- | --- | --- | --- | --- |
+| **Edit** | 否 | 编辑器相机 | 开 | 画 |
+| **Simulate** | **是** | **编辑器相机** | **开** | **画** |
+| **Play** | 是 | 场景的 primary 相机 | 关 | 不画 |
+
+也就是说 **Simulate = 系统在跑，但你还坐在编辑器里**：可以自由飞、可以点选正在下落的盒子、
+可以在 Inspector 里看它的数值在变。Play 是「以游戏的方式看」。这正是 Unreal 的 Play / Simulate
+之分，而对调物理参数来说它不是可选项。
+
+`EditorContext` 因此给出两个**语义明确**的查询，而不是让调用方去比较枚举：
+
+```cpp
+bool isSimulating() const;   // mode != Edit —— 跑系统
+bool isGameView() const;     // mode == Play —— 场景相机 / 无 gizmo / 无调试线
+```
+
+**这里刻意没有 `isPlaying()`。** 六个调用点分属上面两条轴，只有两种模式时恰好重合；留一个
+含混的查询在那儿，下一个人就会拿它去判断「要不要画 gizmo」，于是 Simulate 下 gizmo 就没了。
+同理 `onUpdate` 里那两件事是两个独立的 `if`（Simulate 下「系统在跑」和「相机是编辑器的」同时
+成立），**不是** if-else。
+
+快照机制三种模式共用一套：
 
 ```
-enterPlayMode()   snapshot.copyEntitiesFrom(world.scene())   拷快照
-                  World::resetClock()                        新会话，帧号和固定步长余额归零
-每帧              World::tick(dt)                            和独立 player 同一份代码
-exitPlayMode()    world.scene().copyEntitiesFrom(snapshot)   原样拷回
+enterMode(Simulate/Play)  snapshot.copyEntitiesFrom(world.scene())   拷快照
+                          World::resetClock()                       新会话：帧号和固定步长余额归零
+每帧                      World::tick(dt)                           和独立 player 同一份代码
+exitToEdit()              world.scene().copyEntitiesFrom(snapshot)  原样拷回
 ```
 
-所以 Play 期间的改动不落在正在编辑的场景上。快照靠 `Scene::registerComponentCopy<T>()`
-注册过的类型 —— 漏注册的组件会被静默跳过（有 warn）。重复调 enter / exit 是空操作。
+所以模拟期间的改动（**物理写的 transform 也算**）不落在正在编辑的场景上，「模拟一下再撤销」是
+免费的。快照靠 `Scene::registerComponentCopy<T>()` 注册过的类型 —— 漏注册的组件会被静默跳过
+（有 warn）。重复进同一个模式是空操作。
 
-Play 模式下 gizmo 禁用、编辑器相机不更新（用场景里的 primary 相机），调试线也不提交。
+**只允许 Edit ↔ Simulate 和 Edit ↔ Play**，不做 Simulate ↔ Play 的直接切换（那要先回答「切过去
+之后快照算谁的」）。工具栏两个按钮，激活的那个变成 Stop、另一个禁用。真要求直接切换时
+`enterMode()` 也不会把快照弄乱：先回 Edit 再进另一个模式。
 
-所有换场景的入口都从 `SceneDocument::reset()` 走：那里会退出 Play 模式并清掉选中的实体 ——
+模拟期间 **transform 归物理**，所以拖 gizmo 推不动正在模拟的物体 —— 那是有意的：东西怎么动由
+物理引擎决定（见 [Scene.md](Scene.md) 的 3.1）。
+
+所有换场景的入口都从 `SceneDocument::reset()` 走：那里会无条件退到 Edit 并清掉选中的实体 ——
 快照和选中 ID 指的是马上要被清掉的实体，留着就是悬空引用。
 
 ### 编辑器专属的平台代码

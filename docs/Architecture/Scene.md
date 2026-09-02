@@ -20,10 +20,10 @@ EnTT 之上的 ECS，`Scene` 是门面和聚合根。每个实体自带五个必
 `runSystems()` 之前更新，只重算局部变换 / 父级 / 脏标记变过的分支。
 
 系统分四个 stage：`FixedUpdate` / `Update` / `LateUpdate` / `RenderExtract`。ArtiEngine 目前
-**没有注册任何系统** —— 抽取是 `SceneRenderer` 直接调的，不走 `RenderExtract`。四个 stage
-都空着但循环在跑，是物理 / 脚本将来的挂载点。
+注册了**一个**系统：`PhysicsSystem` 挂在 `FixedUpdate`（见 3.1）。`Update` / `LateUpdate` 还空着
+但循环在跑，是脚本将来的挂载点；抽取是 `SceneRenderer` 直接调的，不走 `RenderExtract`。
 
-## 2. ArtiEngine 的六个组件
+## 2. ArtiEngine 的八个组件
 
 `ArtiEngine/scene/components.h`。都是纯数据。
 
@@ -35,6 +35,8 @@ EnTT 之上的 ECS，`Scene` 是门面和聚合根。每个实体自带五个必
 | `PointLightComponent` | `artiengine.point_light` | `color` / `intensity`（默认 25）/ `range` / `enabled` |
 | `SpotLightComponent` | `artiengine.spot_light` | 同上 + `inner_cone_degrees` / `outer_cone_degrees` |
 | `EnvironmentComponent` | `artiengine.environment` | equirect 贴图 handle、`sky_color` / `intensity` / `enabled` / `sky_visible` |
+| `RigidBodyComponent` | `artiengine.rigid_body` | `type`（Static / Kinematic / Dynamic，默认 Dynamic）/ `gravity_scale` / `enable_sleep` |
+| `ColliderComponent` | `artiengine.collider` | `shape`（Box / Sphere / Capsule）+ `half_extents` / `radius` / `half_height` + `density` / `friction` / `restitution` |
 
 几个刻意的取舍：
 
@@ -49,12 +51,22 @@ EnTT 之上的 ECS，`Scene` 是门面和聚合根。每个实体自带五个必
   剔除时的包围球半径。
 - **环境一个场景只取一份**（抽取时遇到第一个 `EnvironmentComponent` 就 break）。「环境」就是
   唯一的那个背景，不像灯光那样是列表。
+- **物理要两个组件都在才会被模拟**，缺一个记一条 warn 并跳过。不做「只有 collider 就当静态碰撞
+  体」那种隐式创建 —— 隐式的 body 会让「为什么这东西会挡住我」变得不好查。材质属性
+  （density / friction / restitution）挂在 collider 上而不是 body 上，和 Box3D 一致：将来做复合体
+  时，一个 body 上各部分的材质本来就该各自不同。
+- **碰撞体尺寸是显式写在组件里的，不从 `TransformComponent` 的 scale 推**，而且存的是**半长**
+  （和 Box3D 的 `b3MakeBoxHull` 一致，省掉一次转换和一类 bug）。代价是缩放过的实体不参与模拟
+  （见 3.1）—— 「一块大地面」因此要拆成两个实体：缩放过的立方体做视觉，不缩放的空实体做碰撞体。
+- **三种形状的尺寸字段都常驻**，只有 `shape` 选中的那些有意义。这样来回切形状不会丢掉调好的值，
+  Inspector 也只画当前形状用得到的那几行。
 
 ### 注册
 
 `registerSceneComponents()`（`ArtiEngine/scene/component_registration.h`）一次做两件事：
 
-1. `Scene::registerComponentCopy<T>()` —— 六个组件都注册，让 Play 模式的场景快照能完整拷贝。
+1. `Scene::registerComponentCopy<T>()` —— 八个组件都注册，让 Play / Simulate 模式的场景快照能
+   完整拷贝。
    **这是进程级的**。
 2. 传了 registry 的话，再注册 YAML 序列化策略。序列化 registry **不是**进程级的（是个对象），
    所以每个 `World` 自己持一份。
@@ -92,6 +104,48 @@ FixedTimestepAccumulator 按固定步长补齐 → runSystems(FixedUpdate) 若�
 Play 出来的效果」和「exe 跑出来的效果」会各自漂移，而两边单独看都是对的。
 
 换场景时时钟一并归零：换了场景，上一个场景攒下的固定步长余额没有意义。
+
+### 3.1 物理：`FixedUpdate` 唯一的消费者
+
+`ArtiEngine/runtime/physics_system.h`。Box3D（`third_party/box3d`，submodule 跟 `main`）的封装，
+注册在 `World` 的构造函数里 —— **全工程只有这一处**，所以编辑器的 Play / Simulate 和独立 player
+跑的是同一份，不会出现「编辑器里能掉、exe 里不动」。
+
+`b3*` 的类型一个都不出现在头文件里（pimpl），`artiengine_runtime` 对 `box3d` 是 PRIVATE 链接，
+所以下游看不见 box3d 的头。
+
+一个固定步长做三件事：
+
+```
+帧号不再单调递增？ → 拆掉旧的 b3World、按当前场景重建（一个物理实体 = 一个 body + 一个 shape）
+b3World_Step(fixedDeltaTime, 4 个子步)
+b3World_GetBodyEvents() → 按 userData 里的实体 UUID 找到实体，写回 TransformComponent
+```
+
+`FixedTimestepAccumulator` 的默认步长是 1/60，正是 Box3D 推荐的 `1/60 + 4 子步`（内部相当于
+240 Hz 求解），两边不用互相迁就。事件数组只在下一次 step 之前有效，所以当场消费完、不存指针。
+
+三条要记住的规矩：
+
+- **模拟期间 transform 归物理。** 写回只动 translation 和 rotation，**不动 scale**。所以在
+  Simulate 里拖 gizmo 推不动正在模拟的物体 —— 那是有意的：东西怎么动由物理引擎决定。Stop 之后
+  场景从快照恢复，编辑期的值一点没丢。
+- **只作用于没有父级、且缩放是 1 的实体。** 另外两种情况建世界时各记一条 warn 并跳过（建一次打
+  一次，不是每帧）。物理在世界空间算而 `TransformComponent` 是局部的，带父级要拿父级的世界逆
+  矩阵反算，那是另一件事。
+- **重建世界的信号是帧号回退**，不是某个显式回调。`resetClock()`（`enterMode()` 和 `loadScene()`
+  都会调）把 `frameIndex` 归零，物理看到帧号不再单调递增就重建。比较单调性而不是判 `== 0`，
+  是因为 `FixedUpdate` 一帧里可能被调多次（追帧）。这是个将就：更干净的做法是给 `SceneSystem`
+  加一个 `onSimulationStart()`，但那要改 ArtiChoco。**这个信号哪天变脆，就该去加那个虚函数，
+  不要在这儿叠补丁。**
+
+单线程（`workerCount` 默认 1），没接 Box3D 的任务系统。没有射线查询、触发器、关节、三角网格 /
+高度场碰撞体、复合体 —— 现在没有脚本，查到了也没人消费。
+
+两处配套的东西：`ArtiEngine/runtime/tests/physics_smoke.cpp`（`ctest` 里的 `physics_smoke`）只链
+box3d、不碰引擎 —— submodule 跟 `main`，所以 `git submodule update --remote` 之后第一个报警的应该
+是它；`projects/Assets/Scenes/physics_test.artiscene` 是端到端的场景，除了三个会掉的盒子还故意
+放了三个「该被跳过」的实体（缩放过的、只有 collider 的、带父级的）。
 
 ## 4. 抽取：Scene → RenderScene
 

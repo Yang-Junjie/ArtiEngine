@@ -38,7 +38,7 @@
 ├──────────────────────────────────────────────────────────┤
 │  ArtiSDK   Vulkan · GLM · SDL3 · Slang（都从 Vulkan SDK 取）│
 │  第三方    NVRHI · EnTT · spdlog · enkiTS · yaml-cpp      │
-│            Dear ImGui · ImGuizmo · cgltf · stb_image     │
+│            ImGui · ImGuizmo · cgltf · stb_image · Box3D  │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -53,8 +53,8 @@
 | `ArtiChoco::Asset` | 资产框架：storage / catalog / importer 接口 / loader 接口 / 三方对账 / 设置三层解析 | 具体有哪些资产类型 |
 | `ArtiChoco::Project` | `.artiproj` 的读写与 `Assets` / `Library/Artifacts` 两个根 | 其他一切 |
 | `ArtiRenderer::Renderer` | 从 `RenderScene`（网格 + 材质 + 灯光 + 环境）到画面：延迟管线、IBL、tone mapping、GPU 拾取、调试线 | 场景怎么组织、资产怎么来的 |
-| `ArtiEngine::Engine` | 引擎的**数据模型**：四种资产类型、三个 importer、四个 loader、六个游戏组件、`Scene → RenderScene` 抽取 | 主循环、窗口 |
-| `ArtiEngine::Runtime` | **驱动**数据模型的循环：`World` 的 tick、资产工作区、一帧的 prepare / submit | UI、编辑器状态 |
+| `ArtiEngine::Engine` | 引擎的**数据模型**：四种资产类型、三个 importer、四个 loader、八个游戏组件、`Scene → RenderScene` 抽取 | 主循环、窗口 |
+| `ArtiEngine::Runtime` | **驱动**数据模型的循环：`World` 的 tick、刚体物理（Box3D）、资产工作区、一帧的 prepare / submit | UI、编辑器状态 |
 | `ArtiEngine::ImGui` | ImGui 上下文、SDL3 事件桥、字体、docking，产出 `FrameOverlay` | 画什么面板 |
 
 ## 3. target 依赖
@@ -72,7 +72,7 @@
 | `ArtiChoco::Project` | 静态库 | Core · yaml-cpp |
 | `ArtiRenderer::Renderer` | 静态库 | ArtiChoco::{Core, Renderer} · `ArtiSDK::Slang`(P) |
 | `ArtiEngine::Engine` | 静态库 | `ArtiRenderer::Renderer` · ArtiChoco::{Core, Scene, Asset} · cgltf(P) · stb(P) |
-| `ArtiEngine::Runtime` | 静态库 | `ArtiEngine::Engine` |
+| `ArtiEngine::Runtime` | 静态库 | `ArtiEngine::Engine` · box3d(P) |
 | `ArtiEngine::ImGui` | 静态库 | `ArtiEngine::Engine` · `ImGui::Core` · ArtiChoco::Platform(P) · SDL3(P) · `ImGui::SDL3Backend`(P) |
 | `ArtiTools::Asset` | 静态库 | `ArtiEngine::Runtime` · `ArtiChoco::Project` |
 | `ArtiTools::Platform` | 静态库 | ole32 · shell32（仅 Windows） |
@@ -84,9 +84,11 @@
 
 三个值得知道的取舍：
 
-- **`Engine` 和 `Runtime` 分成两个库**，尽管外部依赖完全一样。`Engine` 是数据模型，
-  `Runtime` 是驱动它的循环。将来 `Runtime` 要加脚本 VM 或物理，不必让所有只消费数据类型的
-  目标（比如 CLI 工具）跟着背。
+- **`Engine` 和 `Runtime` 分成两个库**。`Engine` 是数据模型，`Runtime` 是驱动它的循环 ——
+  这条界限已经兑现过一次：物理（box3d）进的是 `Runtime`，而且是 PRIVATE，所以只消费数据类型的
+  目标看不见 box3d 的头。将来的脚本 VM 同理。**代价**：`ArtiTools::Asset` 链 `Runtime`，所以
+  `asset_tools` 会跟着链上 box3d 但永远不建物理世界 —— 和它链了 Vulkan 却从不建 `RenderDevice`
+  是同一种情况。真嫌重的话，出路是把 `AssetPipeline` 从 `Runtime` 上摘下来。
 - **ImGui 宿主单独一个库**。它要链 SDL3 和 imgui 的 SDL3 后端；核心库的下游不该因为
   「可能要画 UI」就背上窗口系统。`ArtiChoco::Renderer` 和 `ArtiRenderer::Renderer` 都不链
   Platform，这条界限从下到上是一致的。
@@ -126,8 +128,8 @@ Assets/foo.gltf ─importer─→ Library/Artifacts/<uuid>.artimesh ─loader─
 `Application::run()` 每帧按 `onUpdate` → `onImGuiRender` → `onRender` 遍历 layer 栈：
 
 ```
-onUpdate       Play 模式 → World::tick(dt)（FixedUpdate 补齐，然后 Update / LateUpdate）
-               Edit 模式 → 更新编辑器相机
+onUpdate       Simulate / Play → World::tick(dt)（FixedUpdate 补齐，然后 Update / LateUpdate）
+               Edit / Simulate → 更新编辑器相机（两条轴各判一次，见 Applications.md）
 onImGuiRender  生成 UI draw data（不提交）：菜单、工具条、面板、Viewport、gizmo
                Viewport 里的点击 → Renderer::requestPick()
 onRender       SceneRenderer::prepare()   抽取这一帧的 RenderScene
@@ -154,7 +156,7 @@ ArtiEngine/          引擎层源码
 Runtime/player/      独立播放器
 Tools/               编辑器、CLI、工具专用平台代码、UI 资源（字体）
 ArtiRenderer/        submodule（内含嵌套 submodule ArtiChoco 和 imgui）
-third_party/         ImGuizmo（submodule）、cgltf
+third_party/         ImGuizmo、box3d（都是 submodule）、cgltf
 projects/            示例项目（既是手动验证场地，也是磁盘布局的活文档）
 docs/Architecture/   本目录
 ```
@@ -257,7 +259,10 @@ cmake --build --preset debug
 | 阴影的视锥剔除 | 四级 cascade 意味着几何一帧画五遍（G-Buffer + 4 级），而没有剔除时**每级都把整个场景画一遍**，包括那一级正交范围外的物体。剔除要按每级的光锥做，不是按相机视锥 |
 | 源内容变更检测 | `.meta` 的 `ContentHash` / `Size` / `Importer.Version` **只写不读**。目前只有 artifact 缺失才触发重导，改了源文件内容必须手动重导 |
 | 资产管线多线程 | reconcile 全程同步单线程。`scan()` 是纯读、无共享写，将来换 `parallelFor` 语义不变 |
-| 物理 / 脚本 / 音频 | 完全没有。系统 stage（`FixedUpdate` / `Update` / `LateUpdate`）已经在跑，是它们现成的挂载点 |
+| 脚本 / 音频 | 完全没有。`Update` / `LateUpdate` 两个 stage 空着在跑，是它们现成的挂载点（`FixedUpdate` 现在被物理占了） |
+| 物理的其余部分 | 刚体已经有了（球 / 盒 / 胶囊、静态 / 运动学 / 动态、休眠、堆叠）。还没有的：射线查询、触发器（sensor）、关节、三角网格 / 高度场碰撞体、复合体（一个 body 多个 collider）、角色控制器、多线程（桥到 enkiTS）。Box3D 这些都有，随时能加 —— 但现在没有脚本，查询结果没人消费 |
+| 带父级或有缩放的实体不参与模拟 | 物理在世界空间算而 `TransformComponent` 是局部的，带父级要拿父级的世界逆矩阵反算；碰撞体尺寸显式写在组件里、不跟 scale 走。两种情况都记一条 warn 并跳过，所以「一块大地面」要拆成缩放过的视觉体 + 不缩放的碰撞体两个实体 |
+| 渲染插值 | 物理按固定步长跑，画面按帧率画，所以快速运动会有细微抖动。接缝是现成的：`FixedTimestepAccumulator::alpha()`（当前余额占一个固定步的比例）还没人用 |
 | 前向管线 | 已整条移除，只有延迟一条路径。不留双路径是刻意的 |
 | 场景作为资产 | `.artiscene` 没有 handle、没有 artifact，靠项目根相对路径引用 |
 | rename / delete 感知 | 在文件管理器里改名会让旧 UUID 变孤儿被回收、新文件拿新 UUID，场景引用静默失效。变通办法是连 `.meta` 一起改名 |
