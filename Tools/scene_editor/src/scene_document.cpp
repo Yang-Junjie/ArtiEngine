@@ -43,7 +43,8 @@ SceneDocument::SceneDocument(EditorContext& context)
 SceneDocument::~SceneDocument() = default;
 
 void SceneDocument::reset() {
-    m_context->exitPlayMode();
+    // 换场景前无条件退到 Edit（不管当前是 Simulate 还是 Play）：快照属于旧场景。
+    m_context->exitToEdit();
     m_context->world().clear();
     m_context->clearSelection();
     m_file.clear();

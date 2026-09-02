@@ -142,9 +142,12 @@ void EditorLayer::onUpdate(core::Timestep deltaTime) {
     }
 
     const float dt = deltaTime.getSeconds();
-    if (m_context->isPlaying()) {
-        m_context->updatePlay(dt);
-    } else {
+    // 两条轴各判一次，**别写回 if-else**：Simulate 下系统在跑，而相机还是编辑器的，两件事同时
+    // 成立（D8）。Play 下相机交给场景的 primary，编辑器相机不该跟着动。
+    if (m_context->isSimulating()) {
+        m_context->updateSimulation(dt);
+    }
+    if (!m_context->isGameView()) {
         updateEditorCamera(dt);
     }
 }
@@ -160,7 +163,7 @@ void EditorLayer::onImGuiRender() {
 
     m_imgui->dockSpaceOverViewport();
 
-    const bool gizmo_enabled = !m_context->isPlaying();
+    const bool gizmo_enabled = !m_context->isGameView();
     m_gizmo->handleShortcuts(gizmo_enabled);
 
     drawMenuBar();
@@ -206,9 +209,9 @@ void EditorLayer::onRender() {
     engine::SceneRenderer::ViewportInfo viewport;
     viewport.width = m_viewport_width;
     viewport.height = m_viewport_height;
-    // 编辑模式下相机是编辑器的，不是场景里的 —— 盖掉场景里的 primary 相机。
+    // Edit 和 Simulate 下相机是编辑器的，不是场景里的 —— 盖掉场景里的 primary 相机。
     // 尺寸为 0 时不算：宽高比会变成 0/0。
-    if (!m_context->isPlaying() && m_viewport_width != 0 && m_viewport_height != 0) {
+    if (!m_context->isGameView() && m_viewport_width != 0 && m_viewport_height != 0) {
         viewport.view_override =
                 m_editor_camera->buildRenderView(m_viewport_width, m_viewport_height);
     }
@@ -222,7 +225,7 @@ void EditorLayer::onRender() {
 
     // 调试线必须在 submit **之前**提交：它们只作用于紧接着的那一帧，和 requestPick 一样。
     // 放在 prepare 之后是因为要用相机（编辑器相机的覆盖也已经生效了）。
-    if (has_scene && !m_context->isPlaying()) {
+    if (has_scene && !m_context->isGameView()) {
         submitSelectionGizmos();
     }
 
@@ -319,19 +322,38 @@ void EditorLayer::drawMenuBar() {
 void EditorLayer::drawToolbar() {
     ImGui::Begin("Toolbar", nullptr);
 
-    const bool playing = m_context->isPlaying();
-    if (ImGui::Button(playing ? "Stop" : "Play", ImVec2{ 80.0f, 0.0f })) {
-        if (playing) {
-            m_context->exitPlayMode();
-        } else {
-            m_context->enterPlayMode();
+    // 两个模式按钮：当前就是这个模式时它变成 Stop，另一个模式正在跑时它禁用 ——
+    // D8 不做 Simulate ↔ Play 的直接切换，所以「两个都能按」这种状态不该出现。
+    const auto mode = m_context->mode();
+    const auto modeButton = [this, mode](const char* label, EditorContext::Mode target) {
+        const bool active = mode == target;
+        // 按钮的 ID 就是它的文字，而文字会在 Stop / Play 之间变 —— 显式 PushID 钉住身份，
+        // 免得将来两个按钮在某个状态下文字撞车。
+        ImGui::PushID(label);
+        ImGui::BeginDisabled(!active && mode != EditorContext::Mode::Edit);
+        if (ImGui::Button(active ? "Stop" : label, ImVec2{ 80.0f, 0.0f })) {
+            if (active) {
+                m_context->exitToEdit();
+            } else {
+                m_context->enterMode(target);
+            }
         }
-    }
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    };
+
+    modeButton("Play", EditorContext::Mode::Play);
+    ImGui::SameLine();
+    modeButton("Simulate", EditorContext::Mode::Simulate);
 
     ImGui::SameLine();
-    ImGui::TextUnformatted(playing ? "[Play]" : "[Edit]");
+    ImGui::TextUnformatted(mode == EditorContext::Mode::Play         ? "[Play]"
+                    : mode == EditorContext::Mode::Simulate ? "[Simulate]"
+                                                            : "[Edit]");
 
-    if (!playing) {
+    // gizmo 的这几个控件跟着 gizmo 走，也就是「是不是游戏视角」那条轴 —— Simulate 下 gizmo
+    // 还在，所以它们也还在。
+    if (!m_context->isGameView()) {
         ImGui::SameLine();
         const auto operation = m_gizmo->operation();
         const char* label = operation == ImGuizmo::TRANSLATE ? "Translate"
@@ -348,7 +370,7 @@ void EditorLayer::drawToolbar() {
 
     ImGui::SameLine();
     ImGui::Text("| %.1f FPS | %u draws", ImGui::GetIO().Framerate, m_last_statistics.draw_calls);
-    if (playing && !m_scene_renderer->hasCamera()) {
+    if (m_context->isGameView() && !m_scene_renderer->hasCamera()) {
         ImGui::SameLine();
         ImGui::TextColored(ImVec4{ 1.0f, 0.4f, 0.3f, 1.0f },
                 "| no primary camera — nothing to render");

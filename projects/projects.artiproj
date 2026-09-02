@@ -4,6 +4,6 @@ Project:
   Author: Unknown
   Description: An ArtiChoco project.
   StartScene: Assets/Scenes/1.artiscene
-  LastOpenScene: Assets/Scenes/1.artiscene
+  LastOpenScene: Assets/Scenes/physics_test.artiscene
   AssetsPath: Assets
   ArtifactsPath: Library/Artifacts

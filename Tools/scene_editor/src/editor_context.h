@@ -16,7 +16,16 @@ class EditorProject;
 
 class EditorContext {
 public:
-    enum class Mode { Edit, Play };
+    // 三种模式的区别只有两条**互相独立**的轴：跑不跑系统、是不是游戏视角。
+    //
+    //             跑系统   相机           gizmo / 调试线
+    //   Edit        否    编辑器相机           画
+    //   Simulate    是    编辑器相机           画
+    //   Play        是    场景的 primary       不画
+    //
+    // 也就是说 Simulate = 系统在跑，但你还坐在编辑器里。只允许 Edit ↔ Simulate 和
+    // Edit ↔ Play，不做 Simulate ↔ Play 的直接切换（那要先回答「切过去之后快照算谁的」）。
+    enum class Mode { Edit, Simulate, Play };
 
     explicit EditorContext(EditorProject& project);
     ~EditorContext();
@@ -43,15 +52,21 @@ public:
     void clearSelection() noexcept { m_selected_entity.reset(); }
 
     Mode mode() const noexcept { return m_mode; }
-    bool isPlaying() const noexcept { return m_mode == Mode::Play; }
 
-    // 进 Play：先把场景拷进快照，Stop 的时候原样拷回来。重复调用是空操作
-    void enterPlayMode();
-    // 回 Edit：从快照恢复场景。重复调用是空操作
-    void exitPlayMode();
+    // 上面那两条轴各自一个查询。**别加回一个 isPlaying()** —— 它恰好是这次要拆开的那个含混点，
+    // 留着它下一个人就会拿它去判断「要不要画 gizmo」，于是 Simulate 下 gizmo 就没了。
+    bool isSimulating() const noexcept { return m_mode != Mode::Edit; }
+    bool isGameView() const noexcept { return m_mode == Mode::Play; }
 
-    // 跑一帧 Play 模式的系统。计时状态在 World 里 —— 那是运行时的一部分，不是编辑器的。
-    void updatePlay(float delta_time);
+    // 进 Simulate 或 Play：先把场景拷进快照，回 Edit 时原样拷回来 —— 所以「模拟一下再撤销」
+    // 是免费的。传 Mode::Edit 等于 exitToEdit()；重复进同一个模式是空操作。
+    void enterMode(Mode mode);
+    // 回 Edit：从快照恢复场景。已经在 Edit 就是空操作。
+    void exitToEdit();
+
+    // 跑一帧模拟（Simulate 和 Play 走的是同一条路）。计时状态在 World 里 —— 那是运行时的
+    // 一部分，不是编辑器的。
+    void updateSimulation(float delta_time);
 
 private:
     struct State;
