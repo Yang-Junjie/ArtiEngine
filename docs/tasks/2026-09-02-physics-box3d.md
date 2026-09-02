@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 进行中（阶段 1～3 完成，盒子会掉了） |
+| **状态** | 进行中（阶段 1～3 完成；阶段 4 代码写完，Simulate 那半边还没肉眼过） |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（全部改动都在这里；ArtiRenderer / ArtiChoco 不动） |
@@ -14,8 +14,8 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：**阶段 1～3 完成 —— 盒子真的掉下来、堆起来了。** 阶段 4（Simulate 模式）、
-5（文档收尾）未动。
+**当前进度**：**阶段 1～3 完成 —— 盒子真的掉下来、堆起来了。** 阶段 4 的代码也写完了
+（4.1 / 4.5 验收过；4.2 / 4.3 只看到了 Play 那半边，见下面「阶段 4 还差什么」）。阶段 5 未动。
 
 - box3d 在 `third_party/box3d`，指针 `47d7f7c`（`v0.1.0-21-g47d7f7c`），`.gitmodules` 里有 `branch = main`。
 - `third_party/CMakeLists.txt` 里 `add_subdirectory(box3d)`；`box3d` target 建得出来，产物是
@@ -70,9 +70,23 @@ gizmo 的效果会被下一步覆盖（body 睡着时看起来能拖，一醒又
 **建议**：4.3 的验收改成「gizmo 在、能选中、能看数值在变」，把「推一把」单独记成后续任务（要么
 做「拖动时给 body 设速度」，要么只在 Stop 之后允许改）。**别在 4.3 里顺手塞一个 SetTransform。**
 
-**下一步**：阶段 4.1 —— `EditorContext` 三态化（`Mode` 加 `Simulate`、`isPlaying()` 拆成
-`isSimulating()` / `isGameView()`、`updatePlay()` 改名 `updateSimulation()`），然后按 D8 那张表
-逐个改五个调用点。
+**阶段 4 的形状**：`Mode { Edit, Simulate, Play }`；`isPlaying()` 删掉了，换成
+`isSimulating()`（`mode != Edit`，跑系统）和 `isGameView()`（`mode == Play`，场景相机 / 无 gizmo /
+无调试线）；`enterPlayMode` / `exitPlayMode` → `enterMode(Mode)` / `exitToEdit()`；
+`updatePlay` → `updateSimulation`。六个调用点全按 D8 那张表改完了。
+
+**其中一处不是简单替换**：`onUpdate` 里原来是 `if (isPlaying()) updatePlay(); else
+updateEditorCamera();` —— 两条轴混在一个 if-else 里。Simulate 下这两件事**同时**成立
+（系统在跑，相机还是编辑器的），所以拆成了两个独立的 if。**别写回 if-else。**
+
+**阶段 4 还差什么**：Play 那半边已经在编辑器里看到了 —— 工具栏是 `Stop` + 灰掉的 `Simulate` +
+`[Play]`，视口用的是场景相机，而且选中了 Box C 也**没有** gizmo / 选中轮廓；Inspector 里 Box C 的
+Translation 是 `(0.020, 1.132, -0.022)`，和无头跑出来的数字一模一样（D2 那句「编辑器和 player 跑
+的是同一份」这下是实测过的）。**没看到的是 Edit 和 Simulate 两个状态的工具栏、以及 Simulate 下
+「编辑器相机 + gizmo + 调试线都在，而盒子在掉」**，还有 4.4 的 Stop 之后回原位。
+
+**下一步**：把上面那三样在编辑器里过一眼（工具栏三态、Simulate 那半边、Stop 回原位），
+勾掉 4.2 / 4.3 / 4.4，然后进阶段 5 的文档收尾。
 
 **阶段 1 要确认的三件事 —— 已确认**（都是从 `third_party/box3d/include/box3d/` 的头里读出来的，
 不是从文档抄的）：
@@ -466,7 +480,7 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
 
 这一阶段放在物理能跑**之后**，因为 Simulate 只有在有东西会动的时候才验得出来。
 
-- [ ] **4.1 `EditorContext` 三态化**
+- [x] **4.1 `EditorContext` 三态化**
   - 文件：`Tools/scene_editor/src/editor_context.{h,cpp}`
   - 做法：`Mode` 加 `Simulate`；`isPlaying()` 换成**两个语义明确的查询**
     `isSimulating()`（`mode != Edit`）和 `isGameView()`（`mode == Play`）；
@@ -476,14 +490,14 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
     含混点。让编译器把五个调用点全报出来。
   - 验收：编译报错列出所有调用点（这是预期的），逐个按 D8 的表改完之后编译通过。
 
-- [ ] **4.2 工具栏三态**
+- [~] **4.2 工具栏三态** ← 进行中：只看到 Play 那个状态，Edit / Simulate 两个还没看
   - 文件：`Tools/scene_editor/src/editor_layer.cpp` 的 `drawToolbar()`
   - 做法：两个按钮 `Play` / `Simulate`，激活的那个显示成 `Stop`，另一个禁用
     （D8：不做直接切换）。状态文字 `[Edit]` / `[Simulate]` / `[Play]`。
     gizmo 的那几个操作按钮的显示条件从 `!playing` 改成 `!isGameView()`。
   - 验收：三种状态下工具栏显示正确，按钮不会出现"两个都能按"的状态。
 
-- [ ] **4.3 五个调用点按两条轴改对**
+- [~] **4.3 五个调用点按两条轴改对** ← 进行中：Play 那半边过了，Simulate 那半边还没肉眼过
   - 文件：`editor_layer.cpp`（五处）、`scene_document.cpp`（一处）
   - 做法：照 D8 那张表。`scene_document.cpp` 那处换场景前无条件退到 Edit。
   - 验收：**Simulate 下 gizmo 还在、能自由飞、能点选、能看到选中轮廓和光源线框，
@@ -496,7 +510,7 @@ D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下�
   - 如果没回去：说明 `TransformComponent` 没被 `registerComponentCopy` 覆盖（它是内置五个之一，
     应该有），或者快照时机不对。先在交接区记下来再改。
 
-- [ ] **4.5 两条 warn 真的会出现**
+- [x] **4.5 两条 warn 真的会出现**
   - 验收：给一个有父级的实体加物理组件 → 日志一条 warn 且它不参与模拟；
     缩放不是 1 的实体 → 同样有 warn。
   - 注意：warn 只在建世界时打一次，**不要每帧打** —— 那会淹掉日志。
