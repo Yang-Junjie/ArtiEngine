@@ -253,7 +253,8 @@ cmake --build --preset debug
 | 空缺 | 现状与接缝 |
 | --- | --- |
 | 视锥剔除 | `FrameStatistics::culled` 恒为 0。接缝已留：抽取时算好 `DrawItem::world_bounds`，`Renderer::meshInfo()` 能拿到局部包围盒（顶点数据已经不在 CPU 侧） |
-| 阴影 | 管线里没有 shadow pass，光照全部无遮挡 |
+| 阴影的剩余部分 | 方向光的级联阴影已经有了（4 级、拟合视锥、texel snapping、3×3 PCF、slope-scaled bias、shadow distance + 淡出）。还没有的：点光 cubemap 阴影、聚光阴影、cascade 之间的过渡混合（Godot 的 `blend_splits` 默认也是关的，所以级间能看出接缝）、软阴影（PCSS / VSM / 硬件比较采样器） |
+| 阴影的视锥剔除 | 四级 cascade 意味着几何一帧画五遍（G-Buffer + 4 级），而没有剔除时**每级都把整个场景画一遍**，包括那一级正交范围外的物体。剔除要按每级的光锥做，不是按相机视锥 |
 | 源内容变更检测 | `.meta` 的 `ContentHash` / `Size` / `Importer.Version` **只写不读**。目前只有 artifact 缺失才触发重导，改了源文件内容必须手动重导 |
 | 资产管线多线程 | reconcile 全程同步单线程。`scan()` 是纯读、无共享写，将来换 `parallelFor` 语义不变 |
 | 物理 / 脚本 / 音频 | 完全没有。系统 stage（`FixedUpdate` / `Update` / `LateUpdate`）已经在跑，是它们现成的挂载点 |

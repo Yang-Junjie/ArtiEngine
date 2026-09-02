@@ -85,9 +85,10 @@ pass 包一层 adapter。这样 `RenderTargetSet::prepare()` 有了确定位置�
 | stage | pass | 干什么 / 为什么在这个位置 |
 | --- | --- | --- |
 | `EnvironmentBake` | `EnvironmentBakePass` | 纯 compute，不碰 framebuffer。IBL 烘焙。排最前是因为产物是 Lighting / Sky 的输入，而它自己不依赖任何渲染目标。按环境贴图句柄缓存，只有换贴图那帧真的烘 |
+| `Shadow` | `ShadowPass` | 方向光的级联阴影深度图：把几何按每一级的光源正交视锥重画一遍，只写深度。和 `EnvironmentBake` 同一个性质（产物是 Lighting 的输入、自己不依赖场景目标），所以排在它之后、`Clear` 之前 —— 那样「谁清场景目标」仍然只有 `ClearScenePass` 一处。没有投影光源或没有 draw 的帧整个跳过 |
 | `Clear` | `ClearScenePass` | 独立成 pass 而不是让第一个绘制 pass 顺手清屏 —— 靠约定就成了隐式耦合，改 pass 顺序会静默改变清屏行为 |
 | `GBuffer` | `GBufferPass` | 把材质属性编码进 G-Buffer + SceneDepth，一行光照都不算 |
-| `Lighting` | `DeferredLightingPass` | 全屏三角形读 G-Buffer + 深度，写 SceneColor。**整条管线里唯一求值 BRDF 的地方** |
+| `Lighting` | `DeferredLightingPass` | 全屏三角形读 G-Buffer + 深度，写 SceneColor。**整条管线里唯一求值 BRDF 的地方**，也是唯一采阴影图的地方（只作用在那个投影方向光的直接光项上，不乘 IBL） |
 | `Sky` | `SkyPass` | 排在 Lighting 之后：深度测试 LessOrEqual + 不写深度，只填没被物体覆盖的像素。反过来先画天空，每个被挡住的像素都白画一遍 |
 | `Picking` | `PickingPass` | 复用可见性做 ID 缓冲。排在 PostProcess 之前是因为它读深度、跟颜色无关，而读回是异步的 —— 早提交早能取。没有拾取请求的帧连 ID 缓冲都不建 |
 | `PostProcess` | `TonemapPass` | 曝光 + ACES 拟合曲线（Narkowicz 2015），SceneColor（场景线性 HDR）→ DisplayColor（显示线性 LDR）。**不做 sRGB 编码**，那个由硬件在写 backbuffer 时完成 |
@@ -108,6 +109,7 @@ pass 之间互不认识，靠三个管线拥有的具名结构交接。都带 `r
 | --- | --- | --- |
 | `RenderTargetSet` | `SceneColor`（RGBA16F，场景线性 HDR）、`SceneDepth`、`DisplayColor`（RGBA8，显示线性 LDR）、本帧 backbuffer | Clear/GBuffer/Lighting/Sky → Tonemap → Present/ImGui |
 | `GBufferTargets` | `albedo_metallic`（SRGBA8：rgb=albedo，a=metallic）、`normal_roughness`（RGBA16F：xyz=世界法线，w=roughness）、`emissive_occlusion`（RGBA16F：rgb=emissive，a=occlusion） | GBufferPass → DeferredLightingPass |
+| `ShadowTargets` | 一张 `Texture2DArray` 的 D32 深度图（4 级 × 2048²）+ 每级一个 framebuffer，外加这一帧的 cascade 矩阵、分割距离和投影光源下标 | ShadowPass → DeferredLightingPass |
 | `EnvironmentResources` | `environment` cube（带 mip 链）、`irradiance`（32²）、`prefiltered`（mip ↔ roughness）、`brdf_lut`（split-sum，全局只烘一次） | EnvironmentBakePass → Lighting / Sky |
 
 三个都是**具名字段而不是泛型 slot 表**。`RenderTargetSet` 的名字承载的是色彩空间契约
@@ -133,6 +135,7 @@ push constant 都按反射映射）。
 
 ```
 gbuffer.slang           几何写入
+shadow_depth.slang      级联阴影深度（只写深度，fragmentMain 是空的）
 deferred_lighting.slang BRDF 求值（唯一）
 skybox.slang            天空
 equirect_to_cube.slang  等距柱状 → cube

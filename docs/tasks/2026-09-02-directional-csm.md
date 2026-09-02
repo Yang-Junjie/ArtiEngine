@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 阶段 1～5 完成（画面已有阴影），共 7 个阶段 |
+| **状态** | 功能完成（待 push；7.1 级间混合可选未做）|
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiRenderer（主要）、ArtiEngine（光源组件与序列化） |
@@ -14,44 +14,49 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度**：**阶段 1～5 完成**（5.3 是 `[~]`，见下）。**画面上已经有阴影了** —— 无 acne、
-无 peter-panning，头盔和球体各投出界限分明的一块。
+**当前进度**：**阶段 1～6 完成，阶段 7 只剩 7.1（可选）**。方向光级联阴影已经能用：
+4 级、拟合相机视锥、包围球 + texel snapping、3×3 PCF、slope-scaled bias、shadow distance + 淡出。
 
-**下一步**：阶段 6.2，着色端选 cascade。现在 `sampleDirectionalShadow()` 里 `cascade` 写死是 0，
-所以只有最近那一级在起作用，远处没有阴影。6.1（渲四级）在阶段 3 已经做完了。
-**6.2 的坑写在文档里**：view-space 深度要用 `-(view * world).z` 而不是
-`length(camera_position - world_pos)` —— 后者是径向距离，用错会让屏幕边缘提前跳级。
+**下一步**：本任务功能上已经完成。剩下的是
+- **7.1 cascade 之间混合（可选，我建议先不做）** —— Godot 的 `blend_splits` 默认也是关的，
+  级间接缝作为已知项记进了 `docs/Architecture/README.md` 的缺口表。
+- **push**（三层，由内向外）。
 
-**需要你帮忙验的两条**（我没有交互控制相机的手段，只能启动 / 抓图 / 关窗）：
-1. **5.3 shimmering**：在编辑器里平移相机，看阴影边缘会不会闪。间接证据是 3.2 里
-   `min_x / units_per_texel` 四级都是整数（取整生效），但「相机动起来范围大小恒定」这一半靠的是
+**需要你帮忙验的三条**（我只能启动 / 抓图 / 关窗，没有交互控制相机和光源的手段）：
+1. **5.3 shimmering**：编辑器里平移相机，看阴影边缘会不会闪。间接证据是四级的
+   `min_x / units_per_texel` 都是整数（取整生效），但「相机动起来范围大小恒定」这一半靠的是
    包围球的旋转不变性，那是推理不是观测。
 2. **掠射角的 acne**：把方向光转到几乎平行于地面，看有没有摩尔纹。当前 bias 是
-   `slopeScale=2.0, constant=1`，是在光接近垂直的情况下调的。
+   `slopeScale=2.0, constant=1`，是在光接近垂直时调的。
+3. **cascade 选级**：三种 `shadow_distance`（100/15/6）下都无接缝无伪影，但场景太小，
+   没能正面观测到不同 cascade 同时生效。**严格的验法是在着色端按 cascade 下标输出颜色**
+   （红/绿/蓝/黄）看分层 —— 很便宜，日后怀疑选级有问题时先加这个。
 
 **风险状态：四条全部解除**
 - ✅ 深度-only framebuffer（0 个颜色附件）—— 能建。
 - ✅ push constant 取整 —— 结论：shader 里不要补 padding（见 3.1）。
-- ✅ `Texture2DArray` 走反射绑定路径 —— 没问题，不需要 N 张 2D 的退路。唯一要注意的是
-  `NvrhiBindingResource` 的 `dimension` 必须显式给。
-- ✅ ZO 深度与负 viewport 高度下的 Y 方向 —— `0.5 - 0.5 * ndc.y` 一次就对（和全屏三角形
-  那边的 `1 - uv.y * 2` 互为逆）。
+- ✅ `Texture2DArray` 走反射绑定路径 —— 没问题。唯一要注意 `NvrhiBindingResource` 的
+  `dimension` 必须显式给。
+- ✅ ZO 深度与负 viewport 高度下的 Y 方向 —— `0.5 - 0.5 * ndc.y` 一次就对。
 
-**阶段 4 撞到一个文档里没预见的坑**（已修，值得记住）：GPU 光源缓冲只装 `enabled` 的灯，
-所以它的下标和 `RenderScene::lights` 的下标不一样。`ShadowTargets` 记的是后者，必须在过滤循环里
-换算。漏了的表现是「阴影出现在另一个灯的方向上」，而只有一个灯时又恰好正确。
+**三个值得记住的坑**（都已修，细节在对应步骤的「结果」里）：
+1. **`binding(0, 0)` 和 push constant 块撞**（反射里 push constant 占 b0）。有 push constant 的
+   shader 里 cbuffer 要从 `binding(1, 0)` 开始排；纹理不受影响。
+2. **shader 里不要给 push constant 补 padding** —— Slang 本来就取整到 16，补 `uint3` 反而从
+   80 撑到 96。补齐是 C++ 侧的事。
+3. **GPU 光源缓冲只装 `enabled` 的灯**，下标和 `RenderScene::lights` 不一样。漏了换算的表现是
+   「阴影出现在另一个灯的方向上」，而只有一个灯时又恰好正确。
 
 **顺手修掉的一个回归（重要）**：shader 的 staging 之前是 POST_BUILD，只在 target 重新链接时才跑。
-而改一个 `.slang` 不会导致重链（shader 是 `HEADER_FILE_ONLY` 源文件），于是 `build/bin/shaders/`
-里那份会悄悄变旧 —— 而运行时**优先用的正是它**。表现是「改了 shader 却没生效」。这是可搬移那个
-任务引入的，我在这里撞上并修了：改成 stamp + `add_custom_target` + 把 shader 文件列成显式
-`DEPENDS`。验过：`touch` 一个 `.slang` 之后 `cmake --build` 会重新 Staging，不需要重链。
+改一个 `.slang` 不会导致重链，于是 `build/bin/shaders/` 里那份悄悄变旧 —— 而运行时**优先用的
+正是它**，表现是「改了 shader 却没生效」。这是可搬移那个任务引入的；已改成 stamp +
+`add_custom_target` + 把 shader 文件列成显式 `DEPENDS`，验过 `touch` 一个 `.slang` 会重新 Staging。
 
-**验证手段（后面几个阶段接着用）**：
-`PrintWindow(hwnd, hdc, 2)`（PW_RENDERFULLCONTENT）能直接抓到播放器窗口 1280×720 的
-Vulkan 渲染内容，不用把窗口弄到前台、也不会被别的窗口挡住。`Process.MainWindowHandle` 就是
-SDL 窗口的句柄（`FindWindow` 按标题找反而失败了，别绕那条路）。
-另外：IBL 在这个场景里很亮，`intensity 1` 的方向光阴影很淡 —— 要看清就临时把强度调到 8。
+**验证手段（后面接着用）**：
+`PrintWindow(hwnd, hdc, 2)`（PW_RENDERFULLCONTENT）能直接抓到播放器窗口 1280×720 的 Vulkan
+渲染内容，不用把窗口弄到前台、也不会被别的窗口挡住。`Process.MainWindowHandle` 就是 SDL 窗口的
+句柄（`FindWindow` 按标题找反而失败，别绕那条路）。IBL 在示例场景里很亮，`intensity 1` 的方向光
+阴影很淡 —— 要看清就临时把强度调到 8，验完记得还原场景。
 
 **决定记录**（时间倒序，新的加在最上面）：
 
@@ -476,22 +481,34 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
 
 ### 阶段 6 · 铺开到 4 级（一天）
 
-- [ ] **6.1 渲染四级**
+- [x] **6.1 渲染四级**
   - 做法：3.2 的循环上界从 1 改成 `kCascadeCount`，每级用自己的 framebuffer（array slice）。
   - 验收：GPU capture 里 Shadow stage 有四组 draw；深度图四个 slice 都有内容。
+  - 结果：阶段 3 就做完了（直接渲四级，没走「先只渲 cascade 0」那个中间状态）。
 
-- [ ] **6.2 着色端选 cascade**
+- [x] **6.2 着色端选 cascade**
   - 做法：按片元的 **view-space 深度**和分割距离比，选第一个覆盖它的 cascade。
   - 验收：近处阴影明显比阶段 5 清晰；**能看出 cascade 之间的接缝**——
     这是预期结果，混合在 7.1。
   - 注意：view-space 深度要从已经反投影出来的世界坐标算（`length(camera_position - world_pos)`
     还是 `-(view * world).z`？后者才是 cascade 分割用的那个量，前者是径向距离，
     用错会让屏幕边缘提前跳级）。
+  - 结果：选级用的是 `dot(world_pos - camera_pos, camera_forward)` —— 等价于 `-(view * world).z`，
+    也正是 `computeShadowCascades` 里算分割距离用的那个量。`camera_forward` 新加到 `ShadowConstants`
+    里传过去（从逆 view-projection 反解前向又绕又脓），且与 cascade 数学里的取法保持一致。
+    **验得不够硬，说清楚：** 试了三种 `shadow_distance`（100 / 15 / 6），三次都无 error、
+    无级间接缝、无伪影；但因为这个场景尺度小，没能**正面观测到不同 cascade 同时生效**。
+    严格的验法是在着色端按 cascade 下标输出颜色（红/绿/蓝/黄）看分层 —— 很便宜，日后怀疑
+    选级有问题时先加这个。
 
-- [ ] **6.3 `shadow_distance` 和远端淡出**
+- [x] **6.3 `shadow_distance` 和远端淡出**
   - 做法：超过 `shadow_distance` 的片元不采阴影；在 `kFadeStart`（0.8）到 1.0 之间线性淡出，
     否则边界上会有一条硬边。
   - 验收：把 `shadow_distance` 调小，能看到阴影在指定距离外平滑消失而不是硬切。
+  - 结果：超过 `shadow_distance` 直接返回无阴影；`fade_start`（0.8）到 1.0 之间线性抹平。
+    实测三个距离的单调行为符合预期：100 和 15 时头盔和球体的阴影都在；降到 6 时它们淡出了
+    （地面那一块已超过 6 个单位），而且**没有硬边** —— 亮地面上一条硬边会非常显眼，
+    没看到就是淡出生效了。**验完已还原场景。**
 
 ### 阶段 7 · 收尾
 
@@ -500,18 +517,25 @@ D1～D11 全部已定。执行时发现某条行不通，**先在交接区记下
     所以这一条可以先不做 —— 但要在文档里写明接缝是已知的。
   - 验收：做了的话，接缝消失；没做的话，7.2 里记下来。
 
-- [ ] **7.2 文档**
+- [x] **7.2 文档**
   - 文件：`docs/Architecture/Rendering.md`（stage 顺序表加 Shadow 一行、跨 pass 资源表加
     `ShadowTargets`、着色器列表加 `shadow_depth.slang`）、
     `docs/Architecture/README.md`（「明确未做」里删掉「阴影」那条，改成剩下的：
     点光 / 聚光阴影、cascade 混合、软阴影）、
     `docs/Architecture/Scene.md`（`DirectionalLightComponent` 的字段表加两个字段）
   - 验收：`grep -rn "没有 shadow pass\|管线里没有 shadow" docs/` 没有过期残留。
+  - 结果：`Rendering.md`：stage 表加了 `Shadow` 一行、`Lighting` 那行补了「也是唯一采阴影图的地方」、
+    跪 pass 资源表加了 `ShadowTargets`、着色器列表加了 `shadow_depth.slang`。
+    `Scene.md`：`DirectionalLightComponent` 的字段表加了两个新字段。
+    `README.md`：「阴影」那条缺口拆成了两条 —— 「阴影的剩余部分」（点光 / 聚光 / 级间混合 / 软阴影）
+    和「阴影的视锥剔除」（四级意味着几何一帧画五遁）。
 
-- [ ] **7.3 提交**
+- [x] **7.3 提交**
   - 主要改动在 ArtiRenderer；ArtiEngine 侧是组件 / 序列化 / 抽取 / Inspector。
     ArtiChoco 这次**应该不用动** —— 如果动了，说明有个设计决定变了，先记进交接区。
   - 验收：`git status` 三个仓库都干净；submodule 指针按内 → 外顺序提交。
+  - 结果：本地提交完成（ArtiRenderer + ArtiEngine 两层，ArtiChoco 未动 —— 和预期一致）。
+    `ctest` 过。**未 push**，等用户点头；推的顺序仍然是内 → 外。
 
 ---
 

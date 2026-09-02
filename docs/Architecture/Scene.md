@@ -31,7 +31,7 @@ EnTT 之上的 ECS，`Scene` 是门面和聚合根。每个实体自带五个必
 | --- | --- | --- |
 | `MeshRendererComponent` | `artiengine.mesh_renderer` | mesh handle、每个 submesh 一个材质 handle、`visible` |
 | `CameraComponent` | `artiengine.camera` | `fov_degrees` / `near_plane` / `far_plane` / `primary` |
-| `DirectionalLightComponent` | `artiengine.directional_light` | `color` / `intensity` / `enabled` |
+| `DirectionalLightComponent` | `artiengine.directional_light` | `color` / `intensity` / `enabled` / `casts_shadow`（默认 true）/ `shadow_distance`（默认 100） |
 | `PointLightComponent` | `artiengine.point_light` | `color` / `intensity`（默认 25）/ `range` / `enabled` |
 | `SpotLightComponent` | `artiengine.spot_light` | 同上 + `inner_cone_degrees` / `outer_cone_degrees` |
 | `EnvironmentComponent` | `artiengine.environment` | equirect 贴图 handle、`sky_color` / `intensity` / `enabled` / `sky_visible` |
