@@ -1,6 +1,7 @@
 #include "runtime/world.h"
 
 #include "engine_log.h"
+#include "runtime/physics_system.h"
 #include "scene/component_registration.h"
 
 #include "artichoco/scene/scene.h"
@@ -16,6 +17,9 @@ World::World()
           m_serialization(std::make_unique<scene::SceneSerializationRegistry>()) {
     registerSceneComponents(m_serialization.get());
     m_serializer = std::make_unique<scene::SceneSerializer>(*m_serialization);
+    // 物理是 FixedUpdate 的第一个消费者。注册**只有这一处**，所以编辑器的 Play /
+    // Simulate 和独立 player 跑的是同一份 —— 不会出现「编辑器里能掉、exe 里不动」（D2）。
+    m_scene->addSystem<PhysicsSystem>(scene::SystemStage::FixedUpdate);
 }
 
 World::~World() = default;

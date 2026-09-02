@@ -54,6 +54,7 @@ set_target_properties(artiengine PROPERTIES FOLDER "ArtiEngine")
 # 依赖（脚本 VM、物理）不必让所有消费 Engine 数据类型的目标跟着背。
 add_library(artiengine_runtime STATIC
     runtime/asset_runtime.cpp
+    runtime/physics_system.cpp
     runtime/scene_renderer.cpp
     runtime/world.cpp
 )
@@ -66,6 +67,10 @@ target_link_libraries(artiengine_runtime
         # 公开头里有 RenderSceneExtractor（值成员）和 rendering:: 的类型，Engine 已经
         # PUBLIC 带上了 ArtiChoco::{Core,Scene,Asset} 和 ArtiRenderer::Renderer。
         ArtiEngine::Engine
+    PRIVATE
+        # PRIVATE：b3* 的类型只出现在 physics_system.cpp 里，公开头一个都没有（见那个头的注释）。
+        # 下游因此只是跟着链上这个静态库，不会看见 box3d 的头。
+        box3d
 )
 
 set_target_properties(artiengine_runtime PROPERTIES FOLDER "ArtiEngine")
