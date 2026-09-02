@@ -34,6 +34,7 @@
 
 | 文件 | 状态 | 一句话 |
 | --- | --- | --- |
+| [2026-09-02-artichoco-job-system.md](2026-09-02-artichoco-job-system.md) | 未开工 | 把 ArtiChoco 的 `TaskSystem` 做成真能用的 job system：进程级、句柄、依赖图、优先级、线程命名 + 第一个 ctest。**不接消费者**，只留接口 |
 | [2026-09-02-physics-box3d.md](2026-09-02-physics-box3d.md) | 已完成 | 接入 Box3D 做刚体物理 + Simulate 模式：盒子能掉下来、能堆叠；`FixedUpdate` 第一次真跑 |
 | [2026-09-02-directional-csm.md](2026-09-02-directional-csm.md) | 已完成 | 方向光级联阴影：4 级、拟合相机视锥、texel snapping、3×3 PCF、shadow distance |
 | [2026-09-02-runtime-portability.md](2026-09-02-runtime-portability.md) | 已完成 | 让构建和打包产物可搬移：DLL / CRT / shader staging、shader 与字体两段查找、pack 写进运行时文件 |
