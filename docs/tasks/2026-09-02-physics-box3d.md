@@ -6,7 +6,7 @@
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-02 |
 | **涉及仓库** | ArtiEngine（全部改动都在这里；ArtiRenderer / ArtiChoco 不动） |
-| **目标** | 刚体物理：场景里放一个盒子，Play 之后它掉下来、落在地面上、能堆叠。`FixedUpdate` 这个 stage 第一次真正跑起来 |
+| **目标** | 刚体物理：盒子会掉下来、能堆叠；`FixedUpdate` 第一次真跑；并加一个 **Simulate 模式**（边跑边坐在编辑器里看） |
 
 ---
 
@@ -16,11 +16,16 @@
 
 **当前进度**：未开始。阶段 1～5 全部未动。
 
-**下一步**：阶段 1.1，把 box3d 作为 submodule 接进来并 pin 在 `v0.1.0`。这一步不碰引擎集成，
-只确认「库能建起来、能让一个盒子在纯 C 的冒烟测试里掉下来」。
+**下一步**：阶段 1.1，把 box3d 作为 submodule 接进来（**跟 `main`，不 pin tag**）。
+这一步不碰引擎集成，只确认「库能建起来、能让一个盒子在纯 C 的冒烟测试里掉下来」。
+
+**阶段 1 要顺手确认并记在这里的三件事**（我只从文档确认了 `b3CreateHullShape`）：
+球和胶囊的创建函数名、`b3World_GetBodyEvents` 返回结构的字段名、CMake 选项的实际名字。
 
 **决定记录**（时间倒序，新的加在最上面）：
 
+- 2026-09-02 用户又拍两条：**box3d 不 pin 版本、跟 main**（改写了 D1）；
+  **加第三种模式 Simulate**（新增 D8，阶段 4 重写）。
 - 2026-09-02 用户拍板：**用 Box3D**（不是 Jolt），其余按我的建议 —— transform 在模拟期归物理、
   第一版只做球 / 盒 / 胶囊、不做射线查询和触发器。
 
@@ -93,14 +98,38 @@ Box2D 的，只在凸包生成和几个碰撞例程里留着原来的痕迹。
 
 ## 设计决定
 
-### D1 · box3d 走 submodule，pin 在 `v0.1.0` —— 已定
+### D1 · box3d 走 submodule，**跟 main 而不是 pin tag** —— 已定（用户拍板）
 
 放在 `ArtiEngine/third_party/box3d`，和 ImGuizmo 一样在 `third_party/CMakeLists.txt` 里
 `add_subdirectory` 进来，并加进根 `CMakeLists.txt` 那个「少一层 submodule 就在配置期直接报」的
 检查列表。
 
-**必须 pin tag 而不是跟 main**：它是 alpha，API 会变。跟 main 的话某天 `git submodule update`
-之后编译不过，而那时你正在查别的问题。升级版本应该是一个显式的、单独的 commit。
+`.gitmodules` 里声明 `branch = main`：
+
+```
+[submodule "third_party/box3d"]
+	path = third_party/box3d
+	url = https://github.com/erincatto/box3d.git
+	branch = main
+```
+
+**先澄清一个容易误解的点**：git submodule **永远**记录一个具体 commit，没有「运行时跟最新」这种
+模式。所以「不 pin 版本」的实际含义是 —— 指针指向 `main` 的当前 tip（而不是 `v0.1.0` 那个 tag），
+升级用 `git submodule update --remote third_party/box3d` 拉到新 tip、然后**把新指针作为一个显式
+commit 提交**。
+
+也就是说：**我们仓库的可复现性不受影响**（任何人 clone + `submodule update` 拿到的都是我们记录的
+那个 commit），变化的只是「升级」这个动作的频率和随意程度。原来那条 pin tag 的理由（怕
+`git submodule update` 之后编译不过）站不住 —— 普通的 `submodule update` 只会拉到我们记录的
+commit，只有显式 `--remote` 才会前进。
+
+跟 main 的真实代价：某次 `--remote` 之后上游的 API 变了，我们得跟着改，而**上游 PR 关闭**、
+只能提 issue 等或者自己适配。缓解手段是阶段 1.3 那个 `physics_smoke` —— 它是纯 C 的、不碰引擎，
+所以升级之后第一个报警的就是它。
+
+**升级的规矩**：`--remote` 之后必须过一遍 `physics_smoke` 和端到端验收，指针单独一个
+`chore(deps)` commit（和 `推进 ArtiRenderer 到 <sha>` 一个格式）。ImGuizmo / imgui 已经是
+`branch =` 的先例，所以这条路子在本项目里不是新的。
 
 ### D2 · 物理是 `ArtiEngine::Runtime` 的一部分 —— 已定
 
@@ -161,9 +190,54 @@ Box3D 这些都有（`b3Shape_RayCast` 之类、sensor 系统、六种关节）�
 `worldDef.workerCount` 默认 1、任务回调为空。接多线程要把 `enqueueTask` / `finishTask` 桥到
 ArtiChoco 的 `TaskSystem`（enkiTS），那是一件独立的事，而且在盒子还没掉下来之前无从验证收益。
 
+### D8 · 加第三种模式 Simulate —— 已定（用户提的）
+
+`EditorContext::Mode` 从 `{ Edit, Play }` 变成 `{ Edit, Simulate, Play }`。三者的区别只有两条轴：
+
+| | 跑 `World::tick()` | 相机 | gizmo | 调试线（选中轮廓 / 光源线框） |
+| --- | --- | --- | --- | --- |
+| **Edit** | 否 | 编辑器相机 | 开 | 画 |
+| **Simulate** | **是** | **编辑器相机** | **开** | **画** |
+| **Play** | 是 | 场景的 primary 相机 | 关 | 不画 |
+
+也就是说 **Simulate = 系统在跑，但你还坐在编辑器里**：可以自由飞、可以点选正在下落的盒子、
+可以在 Inspector 里看它的值变化、可以用 gizmo 把它推一把。Play 是"以游戏的方式看"。
+
+这正是 Unreal 的 Play / Simulate 之分。对物理这件事它不是可选项 —— 调物理参数时你要的恰恰是
+"一边跑一边从任意角度看、一边选中看数值"，而 Play 模式把相机交给了场景相机、还关掉了 gizmo。
+
+**快照沿用现有机制**：进 Simulate 和进 Play 都拷快照，退出都拷回。所以"模拟一下再撤销"是免费的，
+这也是 Simulate 有用的另一半原因。
+
+**只允许 Edit ↔ Simulate 和 Edit ↔ Play**，不做 Simulate ↔ Play 的直接切换（UE 允许，但那要处理
+"切过去之后快照算谁的"）。工具栏两个按钮，激活的那个变成 Stop。
+
+**要动的调用点**（`isPlaying()` 现在有五处，每一处都要重新判断该按哪条轴）：
+
+| 位置 | 现在 | 应该 |
+| --- | --- | --- |
+| `editor_layer.cpp:145` 调 `updatePlay` | `isPlaying()` | **跑系统**：`mode != Edit` |
+| `:163` gizmo 开关 | `!isPlaying()` | **gizmo**：`mode != Play` |
+| `:211` 相机覆盖 | `!isPlaying()` | **相机**：`mode != Play` |
+| `:225` 调试线 | `!isPlaying()` | **调试线**：`mode != Play` |
+| `:322` 工具栏 | `isPlaying()` | 三态 |
+| `scene_document.cpp:46` 换场景前退出 | `exitPlayMode()` | 退出到 Edit（不管当前是哪个） |
+
+**这几处不能笼统地用一个 `isPlaying()` 替换** —— 它们分属两条不同的轴（"跑不跑系统"和
+"是不是游戏视角"），现在恰好重合是因为只有两种模式。混用会得到"Simulate 下 gizmo 消失"
+或者"Play 下还在画选中轮廓"这类错。所以 `EditorContext` 上要给出两个**语义明确**的查询，
+而不是让调用方比较枚举：
+
+```cpp
+bool isSimulating() const noexcept;   // mode != Edit，跑系统
+bool isGameView() const noexcept;     // mode == Play，场景相机 / 无 gizmo / 无调试线
+```
+
+`updatePlay` 顺势改名 `updateSimulation`。
+
 ### 待定：无
 
-D1～D7 全部已定。执行时发现某条行不通，**先在交接区记下来再改**，不要默默换方案。
+D1～D8 全部已定。执行时发现某条行不通，**先在交接区记下来再改**，不要默默换方案。
 
 ---
 
@@ -174,10 +248,12 @@ D1～D7 全部已定。执行时发现某条行不通，**先在交接区记下�
 ### 阶段 1 · 接入 box3d（不碰引擎集成）
 
 - [ ] **1.1 加 submodule 并 pin tag**
-  - 命令：`git submodule add https://github.com/erincatto/box3d.git third_party/box3d`
-    然后在 `third_party/box3d` 里 `git checkout v0.1.0`，回到根目录 `git add third_party/box3d`
-  - 文件：`.gitmodules`、根 `CMakeLists.txt`（加进那个 submodule 存在性检查的 `foreach`）
-  - 验收：`git submodule status` 里有 box3d 且指向 v0.1.0 的 commit。
+  - 命令：`git submodule add -b main https://github.com/erincatto/box3d.git third_party/box3d`
+  - 文件：`.gitmodules`（确认 `branch = main` 写进去了）、根 `CMakeLists.txt`
+    （加进那个 submodule 存在性检查的 `foreach`）
+  - 验收：`git submodule status` 里有 box3d；`.gitmodules` 里有 `branch = main`。
+  - 升级的规矩（写进交接区，以后照做）：`git submodule update --remote third_party/box3d`
+    → 跑 `physics_smoke` 和端到端验收 → 指针单独一个 `chore(deps)` commit。
 
 - [ ] **1.2 挂进构建**
   - 文件：`third_party/CMakeLists.txt`
@@ -273,24 +349,44 @@ D1～D7 全部已定。执行时发现某条行不通，**先在交接区记下�
   - 验收：**盒子掉下来、落在地面上、停住**。放三个盒子能堆起来。
     验法：`PrintWindow` 抓播放器窗口（见交接区的验证手段），Play 前后各抓一张。
 
-### 阶段 4 · 编辑器体验
+### 阶段 4 · Simulate 模式 + 编辑器体验
 
-- [ ] **4.1 Stop 之后回到原位**
-  - 做法：不用写代码 —— `EditorContext` 的快照机制应该已经覆盖了（进 Play 拷快照、Stop 拷回）。
-    这一步是**验证**而不是实现。
-  - 验收：Play → 盒子掉下来 → Stop → 盒子回到原来的位置和朝向。
-  - 如果没回去：说明 `TransformComponent` 没被 `registerComponentCopy` 覆盖（它是内置的五个之一，
-    应该有），或者快照的时机不对。先在交接区记下来再改。
+这一阶段放在物理能跑**之后**，因为 Simulate 只有在有东西会动的时候才验得出来。
 
-- [ ] **4.2 两条 warn 真的会出现**
-  - 验收：给一个有父级的实体加物理组件 → 日志里有 warn 且它不参与模拟；
-    给一个缩放不是 1 的实体加 → 同样有 warn。
+- [ ] **4.1 `EditorContext` 三态化**
+  - 文件：`Tools/scene_editor/src/editor_context.{h,cpp}`
+  - 做法：`Mode` 加 `Simulate`；`isPlaying()` 换成**两个语义明确的查询**
+    `isSimulating()`（`mode != Edit`）和 `isGameView()`（`mode == Play`）；
+    `enterPlayMode()` / `exitPlayMode()` 变成 `enterMode(Mode)` / `exitToEdit()`；
+    `updatePlay()` 改名 `updateSimulation()`。
+  - 注意：**别保留 `isPlaying()`** —— 留着它，下一个人会继续用，而它的语义正是这次要拆开的那个
+    含混点。让编译器把五个调用点全报出来。
+  - 验收：编译报错列出所有调用点（这是预期的），逐个按 D8 的表改完之后编译通过。
+
+- [ ] **4.2 工具栏三态**
+  - 文件：`Tools/scene_editor/src/editor_layer.cpp` 的 `drawToolbar()`
+  - 做法：两个按钮 `Play` / `Simulate`，激活的那个显示成 `Stop`，另一个禁用
+    （D8：不做直接切换）。状态文字 `[Edit]` / `[Simulate]` / `[Play]`。
+    gizmo 的那几个操作按钮的显示条件从 `!playing` 改成 `!isGameView()`。
+  - 验收：三种状态下工具栏显示正确，按钮不会出现"两个都能按"的状态。
+
+- [ ] **4.3 五个调用点按两条轴改对**
+  - 文件：`editor_layer.cpp`（五处）、`scene_document.cpp`（一处）
+  - 做法：照 D8 那张表。`scene_document.cpp` 那处换场景前无条件退到 Edit。
+  - 验收：**Simulate 下 gizmo 还在、能自由飞、能点选、能看到选中轮廓和光源线框，
+    而盒子在掉**；Play 下这些都没有、用的是场景相机。
+  - 这条是本阶段的核心验收 —— 两条轴混淆的表现正好是它的反面。
+
+- [ ] **4.4 Stop 之后回到原位（验证，不是实现）**
+  - 做法：不该需要写代码 —— `EditorContext` 的快照机制应该已经覆盖。
+  - 验收：Simulate → 盒子掉下来 → Stop → 回到原位；Play 同样。
+  - 如果没回去：说明 `TransformComponent` 没被 `registerComponentCopy` 覆盖（它是内置五个之一，
+    应该有），或者快照时机不对。先在交接区记下来再改。
+
+- [ ] **4.5 两条 warn 真的会出现**
+  - 验收：给一个有父级的实体加物理组件 → 日志一条 warn 且它不参与模拟；
+    缩放不是 1 的实体 → 同样有 warn。
   - 注意：warn 只在建世界时打一次，**不要每帧打** —— 那会淹掉日志。
-
-- [ ] **4.3 Play 中拖 gizmo**
-  - 做法：Play 模式下 gizmo 已经是禁用的（`editor_layer.cpp` 里
-    `const bool gizmo_enabled = !m_context->isPlaying();`），所以这一步大概也是**验证**。
-  - 验收：Play 中 gizmo 不出现，不会出现「拖了但物理立刻拽回去」的拉锯。
 
 ### 阶段 5 · 收尾
 
@@ -299,7 +395,9 @@ D1～D7 全部已定。执行时发现某条行不通，**先在交接区记下�
     那一节现在写的是「ArtiEngine 目前没有注册任何系统」，要改）、
     `docs/Architecture/README.md`（分层表里 Runtime 那行提一句物理；target 依赖表加 box3d；
     「明确未做」里「物理 / 脚本 / 音频」那条拆开 —— 物理有了，剩下脚本和音频，
-    并新增「物理的射线查询 / 触发器 / 关节 / 多线程」和「带父级或有缩放的实体不参与模拟」）
+    并新增「物理的射线查询 / 触发器 / 关节 / 多线程」和「带父级或有缩放的实体不参与模拟」）、
+    `docs/Architecture/Applications.md`（编辑器那节的 Edit / Play 两模式描述要改成三模式，
+    并说清「跑不跑系统」和「是不是游戏视角」是两条独立的轴）
   - 验收：`grep -rn "没有注册任何系统\|完全没有" docs/Architecture/` 没有过期残留。
 
 - [ ] **5.2 提交**
@@ -313,21 +411,27 @@ D1～D7 全部已定。执行时发现某条行不通，**先在交接区记下�
 1. `ctest` 里 `physics_smoke` 过（纯 C，不涉及引擎）。
 2. 编辑器里给一个立方体加 `RigidBody`（Dynamic）+ `Collider`（Box），把它放在地面上方。
 3. 给地面那块加 `RigidBody`（Static）+ `Collider`（Box）。
-4. **Play → 盒子掉下来、落在地面上、停住。**
-5. 放三个盒子叠着 → 能堆起来不抖。
-6. **Stop → 所有盒子回到原来的位置和朝向。**
-7. 存盘、重开项目 → 组件和参数都还在。
-8. `arti_player` 跑同一个项目 → 表现和编辑器 Play 一致（验的是 D2 那「只有一处注册」）。
-9. 给一个有父级的实体加物理组件 → 日志里一条 warn，它不参与模拟，其余照常。
-
----
+4. **Simulate → 盒子掉下来、落在地面上、停住**，而且这期间：
+   - 相机还是编辑器相机，能自由飞
+   - 能点选正在下落的盒子，Inspector 里的 Transform 数值在变
+   - 选中轮廓和光源线框照常画
+   - gizmo 还在（能把盒子推一把）
+5. **Stop → 所有盒子回到原来的位置和朝向。**
+6. **Play → 同样会掉**，但相机换成场景的 primary 相机、gizmo 消失、调试线不画。
+7. 放三个盒子叠着 → 能堆起来不抖。
+8. 存盘、重开项目 → 组件和参数都还在。
+9. `arti_player` 跑同一个项目 → 表现和编辑器 Play 一致（验的是 D2 那「只有一处注册」）。
+10. 给一个有父级的实体加物理组件 → 日志里一条 warn，它不参与模拟，其余照常。
+11. 工具栏：三种状态显示正确，不会出现「Play 和 Simulate 两个都能按」。
 
 ## 风险与注意
 
 ### Box3D 是 alpha
 
 API 会变，手册还在写（头文件有完整 Doxygen，成文手册未完成），**PR 目前关闭**（只能提 issue）。
-所以：submodule **pin tag**，升级版本单独一个 commit，而且升级时要过一遍 `physics_smoke`。
+所以：submodule **跟 main**（D1，用户拍的），但升级是个**显式动作**：
+`git submodule update --remote` → 过 `physics_smoke` 和端到端验收 → 指针单独一个 commit。
+普通的 `git submodule update` 不会把我们带到新版本上，所以日常开发不会被上游的变动撞到。
 
 我这份文档里的 API 名字是从它的 hello 文档抄的，**已确认**的有：
 `b3DefaultWorldDef` / `b3CreateWorld` / `b3DestroyWorld` / `b3DefaultBodyDef` / `b3CreateBody` /
@@ -381,6 +485,7 @@ CMake 选项的实际名字。这三样阶段 1 看头文件时确认，记进�
 - 带父级的实体、非单位缩放的实体 —— D3，会 warn 并跳过
 - 角色控制器（Box3D 有 character mover，但那是另一件事）
 - 渲染插值（`FixedTimestepAccumulator::alpha()` 是现成接缝，v1 不用）
+- Simulate ↔ Play 的直接切换（D8）—— 得先回 Edit
 
 ---
 
