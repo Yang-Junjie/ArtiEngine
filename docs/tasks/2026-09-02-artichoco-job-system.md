@@ -2,9 +2,9 @@
 
 | | |
 | --- | --- |
-| **状态** | 未开工 |
+| **状态** | 进行中 —— 阶段 1 完成并验收 |
 | **创建** | 2026-09-02 |
-| **最后更新** | 2026-09-02 |
+| **最后更新** | 2026-09-03 |
 | **涉及仓库** | **ArtiChoco**（几乎全部改动）→ ArtiRenderer（推指针）→ ArtiEngine（推指针 + 架构文档）。三层 submodule，见「风险与注意」 |
 | **目标** | 把 `arti::core::TaskSystem` 从「一个能跑但没人用、且有两处真 bug 的 enkiTS 薄壳」做成一个**能被依赖的 job system**：进程级生命周期、任务句柄、依赖图、优先级、grain size、pinned 任务、线程命名与 profiler 钩子，外加一套能证明它**真的在多线程跑**的 ctest |
 | **明确不做** | 不接任何真实消费者（资产管线 / 剔除 / 物理 / 渲染线程都不动）。**用户拍板**：只做第一层，但要把第二层的接口留清楚 |
@@ -15,15 +15,72 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度：未开工。下一步 = 阶段 1 的 1.1。**
+**当前进度：阶段 1 全部完成并验收。下一步 = 阶段 2 的 2.1（槽位池）。**
 
-开工前必须先处理的一件事（不属于本任务，但会缠在一起）：
+开工前那件事已经办了：`vkGetDeviceProcAddr` 的改动单独提交在 ArtiChoco 的 `ab310fc`，
+指针也一路推上来了（ArtiRenderer `fc266de`、ArtiEngine `3e25a8c`）。
 
-- `ArtiRenderer/ArtiChoco` 的工作区**已经有一个未提交的改动** ——
-  `artichoco/renderer/vulkan/nvrhi_vulkan_dispatch.cpp` 给
-  `VULKAN_HPP_DEFAULT_DISPATCHER.init()` 多传了一个 `vkGetDeviceProcAddr`（让 device 级函数指针
-  直接取、不走 instance 级 trampoline）。**先把它单独提交掉**，别和 job system 混进同一个 commit，
-  否则将来 `git log` 里这两件事分不开。
+### 先记一条构建环境的坑（撞过一次，代价是 cmake 缓存被弄坏）
+
+**`ninja` 和 `clang` 都不在普通 shell 的 PATH 上。** 它们在 VS 18 Community 里：
+
+```
+/c/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja
+/c/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/Llvm/x64/bin
+```
+
+平时 `cmake --build --preset debug` 能跑是因为它不需要重跑 configure。**一旦改了任何
+`CMakeLists.txt`**，ninja 会触发 re-configure，那一步找不到 `ninja` 就报
+`CMake was unable to find a build program corresponding to "Ninja"`，
+并且把 `CMakeCache.txt` 里的 `CMAKE_C_COMPILER` / `CMAKE_CXX_COMPILER` 打回 `UNINITIALIZED`、
+`CMAKE_MAKE_PROGRAM` 打成 `NOTFOUND`。**修法**：把上面两个目录 prepend 到 PATH，
+重跑一次 `cmake --preset debug` 就能修好缓存（对象文件还在，不用全量重编）。
+clang 22.1.3 能自己找到 MSVC 的头和库，**不需要先跑 vcvars64**。
+
+### 阶段 1 的实际形状
+
+- `TaskSystemConfig{ worker_count, external_thread_count, name_threads }`，
+  `worker_count == 0` 时**不填** enkiTS 的 `numTaskThreadsToCreate`，保持它自己的默认。
+- `init` / `shutdown` / `isInitialized` / `get()`（抛 `std::logic_error`）。构造和析构转私有，
+  实例是 `task_system.cpp` 里的一个文件内静态裸指针，由 `init` / `shutdown` 管。
+- 调用点：`entry_point.cpp` 里 `Logger::init()` 之后 `TaskSystem::init()`；收尾加了个
+  `shutdownTaskSystem()`（照 `shutdownLogger()` 的 noexcept 形状），**排在 `shutdownLogger()`
+  之前** —— worker 退出的路上还会打日志。`Tools/asset_tools/main.cpp` 和
+  `Tools/asset_tools/tests/asset_pipeline_smoke.cpp` 各自在自己的 `Logger::init()` 旁边补了一对。
+- `Application::m_task_system` 和那个前向声明都删了。
+
+### 和文档不一样的四处（都记着理由）
+
+1. **把 6.1（测试目标）提前到阶段 1 之后做了。** 照原计划测试排在最后，那意味着阶段 2～5 一共
+   五个阶段的代码在落地时都没有任何断言看着 —— 而这个任务恰恰是「没人练它」出的问题。
+   现在 `task_system_test` 已经在 `ctest` 里跑，后面每个阶段往里加断言。
+2. **没有新增 `ARTICHOCO_BUILD_TESTS` 开关，用的是现成的 `BUILD_TESTING`。** 根
+   `CMakeLists.txt` 的 `include(CTest)` 已经把它打开了，而 `asset_pipeline_smoke` 和
+   `physics_smoke` 用的就是这个门（`if(BUILD_TESTING)`）。少一个开关，而且 D9 想要的效果
+   （跟着 ArtiEngine 的 ctest 跑）自动成立。**代价**：ArtiChoco 单独构建时不 `include(CTest)`，
+   所以那种构建里这个测试不建。
+3. **1.4 的验收从「在调试器里看一眼」升级成了真断言。** 测试用
+   `CreateToolhelp32Snapshot` + `OpenThread` + `GetThreadDescription` 从进程外面读线程名，
+   正负两面都断（`name_threads` 开 → 找得到 `ArtiChoco-Worker-*`，关 → 找不到）。
+   **之所以能做到确定性**：worker 是在 `init` 返回之前就起好名的，不依赖任务落在哪个线程上。
+4. **1.2 的验收原文写的是 `workerCount()`，但那个函数要到 4.2 才有**，所以实际断的是
+   `taskThreadCount() == worker_count + 1`。4.2 做完后把断言换成 `workerCount()`。
+
+### 待定项已定
+
+线程命名用 `#if defined(_WIN32)` 写在 `task/thread_naming.cpp` 里。这其实**不算偏离约定** ——
+`artichoco/core/io/paths.cpp` 早就是这么干的（同样的 `WIN32_LEAN_AND_MEAN` / `NOMINMAX` /
+`windows.h` 三连）。「在 CMake 层按平台选源文件」那条是 `Tools/platform` 的约定，针对的是
+一整组平台接口，不是两行诊断代码。
+
+### 阶段 1 的验收都过了
+
+- `cmake --build --preset debug` 干净（21 个目标，无新增 warning）。
+- `ctest` 三个全绿：`task_system_test` 0.07s、`physics_smoke` 0.01s、`asset_pipeline_smoke` 0.60s。
+- **`asset_tools list` 的日志第一行就是 `TaskSystem initialized: 6 thread(s) including the
+  calling thread`，结尾是 `TaskSystem shutdown finished`** —— 现状第 2 条（CLI 进程里
+  `get()` 是 `*nullptr`）由此修掉了，这是实测不是推理。
+- `arti_player` 和 `scene_editor` 各跑 6 秒，日志里 init 那行都在。
 
 已确认的事实（都是读代码 / 跑命令得出的，不是从文档抄的），详见「背景与现状」：
 
@@ -373,7 +430,7 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
 
 ### 阶段 1 · 生命周期与配置（行为不变）
 
-- [ ] **1.1 `TaskSystem` 改成进程级，`get()` 判空**
+- [x] **1.1 `TaskSystem` 改成进程级，`get()` 判空**
   - 文件：`artichoco/core/task/task_system.{h,cpp}`
   - 做法：加 `init(const TaskSystemConfig&)` / `shutdown()` / `isInitialized()`，
     照 `artichoco/core/log.h:77-80` 的形状。`get()` 在未 init 时抛
@@ -381,14 +438,14 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
     实例由 `init` / `shutdown` 管（一个文件内静态 `unique_ptr`）。
   - 验收：编译过；`get()` 在未 init 时抛而不是崩（阶段 6 的测试会正式断言这条）。
 
-- [ ] **1.2 `TaskSystemConfig` 与 `Initialize(config)`**
+- [x] **1.2 `TaskSystemConfig` 与 `Initialize(config)`**
   - 文件：同上
   - 做法：`struct TaskSystemConfig { uint32_t worker_count = 0; uint32_t external_thread_count = 0;
     bool name_threads = true; }`。`worker_count == 0` 时**不填** `numTaskThreadsToCreate`，
     让 enkiTS 用它自己的默认（`hardware_concurrency - 1`）—— 别自己算，那是重复它的策略。
   - 验收：`worker_count = 1` / `= 4` 各 init 一次，`workerCount()` 报的数对得上。
 
-- [ ] **1.3 挪调用点**
+- [x] **1.3 挪调用点**
   - 文件：`artichoco/core/entry_point.cpp`（`Logger::init()` 之后加 `TaskSystem::init()`，
     `shutdownLogger()` **之前**加 `TaskSystem::shutdown()`）、
     `artichoco/core/application.{h,cpp}`（删 `m_task_system` 和那个前向声明）、
@@ -400,7 +457,7 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
     `asset_tools list <项目>` 里 `TaskSystem::isInitialized()` 为真（临时加一行 debug 日志确认，
     确认完删掉）。
 
-- [ ] **1.4 线程命名 + profiler 回调**
+- [x] **1.4 线程命名 + profiler 回调**
   - 文件：`artichoco/core/task/thread_naming.{h,cpp}`（新建，见「待定」那条）、`task_system.cpp`
   - 做法：`TaskSchedulerConfig::profilerCallbacks.threadStart` 里给线程起名
     `ArtiChoco-Worker-<n>`（`n` 是回调给的 `threadnum_`）。其余七个回调先接成空实现 + 注释写明
@@ -510,11 +567,10 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
 
 ### 阶段 6 · 测试、文档、收尾
 
-- [ ] **6.1 ArtiChoco 的第一个 ctest 目标**
-  - 文件：`artichoco/core/tests/task_system_test.cpp`（新建）、`artichoco/core/CMakeLists.txt`、
-    `ArtiChoco/CMakeLists.txt`（加 `option(ARTICHOCO_BUILD_TESTS ... ON)`）
-  - 做法：按 D9 —— 一个带 `main()` 的可执行 + `add_test`，不引测试框架。
-    照 `Tools/asset_tools/CMakeLists.txt:32` 抄形状。
+- [x] **6.1 ArtiChoco 的第一个 ctest 目标**（**已提前到阶段 1 之后做**，见交接区的偏离 1、2）
+  - 文件：`artichoco/core/tests/task_system_test.cpp`（新建）、`artichoco/core/CMakeLists.txt`
+  - 做法：一个带 `main()` 的可执行 + `add_test`，不引测试框架，门用现成的 `BUILD_TESTING`
+    （不是新开一个 `ARTICHOCO_BUILD_TESTS`）。照 `Tools/asset_tools/CMakeLists.txt:32` 抄形状。
   - 验收：`ctest` 里出现 `task_system_test` 并通过；`physics_smoke` /
     `asset_pipeline_smoke` 仍绿。
 

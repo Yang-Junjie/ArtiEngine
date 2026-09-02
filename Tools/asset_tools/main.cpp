@@ -3,6 +3,7 @@
 
 #include "artichoco/core/io/paths.h"
 #include "artichoco/core/log.h"
+#include "artichoco/core/task/task_system.h"
 #include "artichoco/project/project_manager.h"
 
 #include <filesystem>
@@ -331,7 +332,10 @@ int run(int argc, char** argv) {
 
 int main(int argc, char** argv) {
     arti::core::Logger::init();
+    // 这个进程没有 Application，任务系统得自己开 —— 见 artichoco/core/task/task_system.h。
+    arti::core::TaskSystem::init();
     const int result = run(argc, argv);
+    arti::core::TaskSystem::shutdown();
     arti::core::Logger::shutdown();
     return result;
 }

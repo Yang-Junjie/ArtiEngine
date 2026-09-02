@@ -1,6 +1,7 @@
 #include "asset_tools/asset_pipeline.h"
 
 #include "artichoco/core/log.h"
+#include "artichoco/core/task/task_system.h"
 #include "artichoco/core/uuid.h"
 #include "asset/builtin_assets.h"
 #include "asset/material_asset.h"
@@ -780,7 +781,9 @@ int run() {
 
 int main() {
     arti::core::Logger::init();
+    arti::core::TaskSystem::init();
     const int result = run();
+    arti::core::TaskSystem::shutdown();
     arti::core::Logger::shutdown();
     return result;
 }
