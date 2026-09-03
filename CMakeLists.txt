@@ -42,9 +42,11 @@ include(ArtiVulkanSDK)
 # Windows 自带的，不带上就是「在装过 VS 的机器上能跑」。见模块开头的说明。
 include(ArtiMsvcRuntime)
 
-# ArtiRenderer 这里是被当依赖库消费的，它自己的 samples 和 tests 不需要跟着建。
+# ArtiRenderer 的 samples 不建：那几个 smoke 用例要真窗口和 Vulkan surface。
+# 但 tests 要建 —— 它们是纯单元测试（不需要显示设备），跟着本仓库的 ctest 跑才不会静默腐烂。
+# 关着的东西会烂：这三个测试在开关打开之前从来没在本仓库跑过。
 set(ARTIRENDERER_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
-set(ARTIRENDERER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ARTIRENDERER_BUILD_TESTS ON CACHE BOOL "" FORCE)
 add_subdirectory(ArtiRenderer)
 
 # third_party 在 ArtiRenderer 之后：ImGuizmo 要用 ArtiRenderer 里的 ImGui::Core（含私有头）。
