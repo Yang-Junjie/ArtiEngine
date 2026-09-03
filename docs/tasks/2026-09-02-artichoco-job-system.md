@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 已完成 —— 第一层做完并验收；6.5 半完成（`test_app` 开工前就编不过，与本任务无关） |
+| **状态** | 已完成 —— 第一层做完并验收。`examples/test_app` 已删（过时，example 另开项目） |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-03 |
 | **涉及仓库** | **ArtiChoco**（几乎全部改动）→ ArtiRenderer（推指针）→ ArtiEngine（推指针 + 架构文档）。三层 submodule，见「风险与注意」 |
@@ -19,10 +19,10 @@
 pinned、外部线程、`TaskGraph`。核心验收（6.2）过了，而且反向验证过不是空转。没有接任何
 真实消费者 —— 那是层二，接口表在架构文档 7.1。
 
-**6.5 半完成**：`render_system.cpp` 已换新 API；`test_app` 目标整体编不过，三个错误在
-NVRHI 迁移（`9287849`）时就有，本任务开工前的 `ab310fc` 里一字不差。不修。
+**6.5 取消**：`examples/test_app` 整棵删掉。那个 example 过时了，example 另开项目写，
+不在本仓库跟。`render_system.cpp` 换新 API 的那一半跟着一起走。
 
-指针：ArtiChoco `ba93e74` → ArtiRenderer `6fa9615`。还没 push。
+指针：ArtiChoco `bd6c171` → ArtiRenderer `cb01637`。还没 push。
 
 **本任务的核心验收（6.2）已经过了，而且验证过它不是空转的**：把 `min_range` 临时改成
 `kCount`（逼成一个分片）之后那条断言确实变红（「实际只有 1 个」），改回 512 又变绿。
@@ -505,7 +505,7 @@ samples 和 tests 不需要跟着建」）。ArtiChoco 的这个开关**不要**
 | --- | --- | --- |
 | `Future<T>`（带返回值的任务） | 现在没有消费者需要，泛型返回值会把 API 面积翻一倍 | 句柄 + 调用方自己捕获输出变量（`parallelFor` 的每线程 bucket 用 `threadIndex()`） |
 | 任务取消 | enkiTS 不支持，硬做要在每个任务体里插检查点 | 调用方传一个 `std::atomic<bool>` 令牌自己查；enkiTS 自己也是这个路子（`GetIsShutdownRequested()`，`:326`） |
-| 渲染线程迁移 | 那是帧数据 double buffer、ImGui 线程归属、swapchain 重建时机三件事，比本任务大 | `external_thread_count` + `registerExternalThread()` + 长驻 `submitPinned`（`examples/test_app/render_system.cpp` 已经演示过形状） |
+| 渲染线程迁移 | 那是帧数据 double buffer、ImGui 线程归属、swapchain 重建时机三件事，比本任务大 | `external_thread_count` + `registerExternalThread()` + 长驻 `submitPinned` |
 | 自己写 work-stealing / fiber | enkiTS 就是干这个的，而且已经在依赖里 | 无 —— 真要换调度器，`TaskSystem` 这一层的存在意义正是让它可换 |
 
 ### 待定：线程命名的实现放哪
@@ -530,7 +530,7 @@ samples 和 tests 不需要跟着建」）。ArtiChoco 的这个开关**不要**
 | 纹理 / 网格解码 + 上传 | `GPUAssetCache` | `submit`（解码，worker）+ `submitPinned`（上传，渲染线程）+ `TaskGraph` 串起来 | Rendering.md 第 1 节已经把界限划好了：「工作线程可以做文件 IO、解压、图片解码，然后把数据交给渲染线程上传」 |
 | 视锥剔除 / 抽取 | `RenderSceneExtractor::extract()` | `parallelFor` + `threadIndex()` 做每线程 bucket | `DrawItem::world_bounds` 每帧已经算好；enkiTS 的 `threadnum_` 注释（`TaskScheduler.h:164-165`）明说这就是它的用途 |
 | 物理多线程 | `PhysicsSystem` → Box3D 的 `b3EnqueueTaskCallback` | `submitParallelFor(count, fn, {min_range})` 拿句柄 + `wait(handle)` | Box3D 的任务回调要的正是「异步 parallel-for 返回一个可等待的东西」这个形状 |
-| 渲染线程 | 三个 exe 的 layer | `TaskSystemConfig::external_thread_count` + `registerExternalThread()` + 长驻 `submitPinned` | `examples/test_app/render_system.cpp:40-50` 已经用旧 API 演示过一遍 |
+| 渲染线程 | 三个 exe 的 layer | `TaskSystemConfig::external_thread_count` + `registerExternalThread()` + 长驻 `submitPinned` | API 已到位；原先演示形状的 `examples/test_app` 已删 |
 
 从这张表反推，第一层**必须**有的东西（也就是任务清单的内容）：
 
@@ -744,15 +744,10 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
   - 做法：README 里写清 API、`waitForAll` 的限制、优先级只有三档、以及 D10 那四件不做的事。
   - 验收：一个没参与这次改动的人能只读文档就写出「解码 + 上传」那个两节点图。
 
-- [~] **6.5 `examples/test_app` 跟上新 API** ← 半完成：`render_system.cpp` 已换新 API 且编过；`test_app` 目标整体编不过（`test_app_layer.cpp` 三个 NVRHI 迁移遗留错误，开工前就有，见交接区）。不修。
-  - 文件：`examples/test_app/test_app_layer.cpp:638-657`、`examples/test_app/render_system.cpp:40-50`
-  - 做法：`launchPinned` / `waitForPinnedTask` 换成 `submitPinned` + `wait`；
-    `verifyTaskSystem()` 里那个「4096 次乘 2」顺手改成有意义的活量（现状第 11 条）。
-  - **必须用 `-DARTICHOCO_BUILD_EXAMPLES=ON` 单独配一次才能发现编译错误** ——
-    默认 OFF，ArtiEngine 的构建不会碰到它（见「风险与注意」）。
-  - 验收：`cmake -DARTICHOCO_BUILD_EXAMPLES=ON` 配置 + 编译通过。
+- [x] **6.5 `examples/test_app` 跟上新 API** ← 取消：整个 `examples/test_app` 已删。
+  example 另开项目写，不在本仓库跟。`ARTICHOCO_BUILD_EXAMPLES` 现在只还建 `asset_test`。
 
-- [x] **6.6 三层 submodule 推指针**（ArtiChoco `ba93e74` → ArtiRenderer `6fa9615`；本 commit 推 ArtiRenderer 指针。还没 push origin）
+- [x] **6.6 三层 submodule 推指针**（ArtiChoco `bd6c171` → ArtiRenderer `cb01637`。还没 push origin）
   - 做法：ArtiChoco 提交 → ArtiRenderer 推 ArtiChoco 指针（`chore(deps)`）→
     ArtiEngine 推 ArtiRenderer 指针（`chore(deps)`）。
   - 验收：从干净克隆 `git submodule update --init --recursive` + `cmake --preset debug` +
@@ -776,7 +771,7 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
 10. `arti_player projects/<项目>.artiproj` 正常跑。
 11. `asset_tools scan <项目>` 正常跑 —— **这条专门证明现状第 2 条修好了**：
     CLI 进程里现在有一个活的 `TaskSystem`。
-12. `cmake -DARTICHOCO_BUILD_EXAMPLES=ON` 配置 + 编译通过（6.5）。
+12. ~~`cmake -DARTICHOCO_BUILD_EXAMPLES=ON` 配置 + 编译通过（6.5）~~ —— 取消。`examples/test_app` 已删。
 13. 调试器线程窗口里 worker 有名字、数量对得上 `workerCount()`。
 14. 干净克隆走一遍 6.6 的流程。
 
@@ -798,12 +793,10 @@ ArtiChoco → ArtiRenderer 推指针 → ArtiEngine 推指针。漏掉中间一�
 开工前先把 `nvrhi_vulkan_dispatch.cpp` 那个 `vkGetDeviceProcAddr` 改动**单独提交掉**
 （见交接区第一条）。不然它会被卷进 job system 的 commit 里。
 
-### `examples/test_app` 是个静默的坑
+### `examples/test_app` 已删
 
-`ARTICHOCO_BUILD_EXAMPLES` 默认 OFF（`ArtiChoco/CMakeLists.txt:5`），ArtiEngine 也没开。
-所以**改掉 `TaskSystem` 的 API 之后，ArtiEngine 的构建一切正常，而 example 已经编不过了** ——
-下一个想跑 ArtiChoco 自己 example 的人才会撞上。6.5 那一步和它的验收方式（单独配一次）
-不是可选的。
+那个 example 过时了（NVRHI 迁移后就编不过），example 另开项目写。`ARTICHOCO_BUILD_EXAMPLES`
+现在只还建 `asset_test`。下面「背景与现状」里提到它的地方是开工时的记录，没改。
 
 ### 别持锁调 `WaitforTask`
 

@@ -287,7 +287,7 @@ cmake --build --preset debug
 | 纹理 / 网格解码 + 上传 | `GPUAssetCache` | `TaskGraph`：解码节点在 worker 上，上传节点 `addPinnedAfter` 钉在渲染线程。Rendering.md 第 1 节已经把这个界限划好了 |
 | 视锥剔除 / 抽取 | `RenderSceneExtractor::extract()` | `parallelForRanges` + `threadIndex()` 做每线程 bucket（`DrawItem::world_bounds` 每帧已经算好） |
 | 物理多线程 | `PhysicsSystem` → Box3D 的 `b3EnqueueTaskCallback` | `submitParallelFor` 拿句柄 + `wait(handle)` —— Box3D 的任务回调要的正是这个形状 |
-| 渲染线程 | 三个 exe 的 layer | `TaskSystemConfig::external_thread_count` + `registerExternalThread()` + 长驻 `submitPinned`（`examples/test_app/render_system.cpp` 已经演示过形状） |
+| 渲染线程 | 三个 exe 的 layer | `TaskSystemConfig::external_thread_count` + `registerExternalThread()` + 长驻 `submitPinned` |
 
 ## 8. 分册
 
