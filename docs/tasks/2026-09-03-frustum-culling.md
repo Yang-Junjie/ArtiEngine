@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 进行中 —— 阶段 1 完成 |
+| **状态** | 进行中 —— 阶段 1、2 完成，阶段 3 待画面验收 |
 | **创建** | 2026-09-03 |
 | **最后更新** | 2026-09-03 |
 | **涉及仓库** | **ArtiRenderer**（几乎全部改动）→ ArtiEngine（推指针 + 打开测试开关 + 文档）。**两层 submodule，不是三层** —— 剔除代码在 `ArtiRenderer/ArtiRenderer`，那是 ArtiRenderer 这个 submodule 自己的库，不是 ArtiChoco |
@@ -15,17 +15,37 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度：阶段 1 完成并验收（`ctest` 7/7）。下一步 = 阶段 2.1（可见集合进 `FrameContext`）。**
+**当前进度：阶段 1、2 完成并验收。阶段 3 代码落地，等画面验收。下一步 = 3.3（看影子）。**
 
 阶段 1 落地的东西：
 - `CMakeLists.txt` —— `ARTIRENDERER_BUILD_TESTS=ON`（1.1）
 - `ArtiRenderer/ArtiRenderer/include/frustum.h` —— 纯头文件，`fromViewProjection` + `intersects`（1.2）
 - `ArtiRenderer/tests/frustum_test.cpp` —— 35 条断言，透视 20 + 正交 15（1.3）
 
+阶段 2 落地的东西：
+- `FrameContext` 构造时算相机可见位（`vector<uint8_t>`，越界 / 空盒一律当可见）
+- `GBufferPass` 两趟都跳过被剔的 draw，只在绘制趟数 `culled`
+- `PickingPass` 读同一份可见位，不数 `culled`
+- 编辑器状态栏 `| FPS | draws | culled`
+
+**阶段 2 验收（执行者在编辑器里看过，2026-09-03）：** 转相机 `culled` 从 0 变正、转回来变回 0，
+`draws + culled` 守恒，视锥边缘看得见的都点得到。
+
+阶段 3 代码已落地，**画面还没对过**：
+- `ShadowCascadeResult::caster_visible` 打平存 4 × draws，XY 重叠循环里顺手置位
+- `ShadowPass` 按它跳过，数 `shadow_culled`
+- 空盒不参与 near/far 收紧（修了一个预存在的坑：空盒八个角变换会污染 min_z / max_z）
+- 编辑器 / 播放器都显示 `shadow culled`
+
+**阶段 3 要盯的：** `shadow_culled > 0`；转相机影子不许闪；**本体在画面外、影子在画面内**
+那个情形影子必须还在。拿相机视锥剔阴影的话这一条会挂。
+
 **阶段 1 唯一的意外，会影响后面：D3 原来的说法有一半是错的。**「near 面写成 NO 公式会导致
 几乎什么都不剔」只对**正交**矩阵成立，对透视矩阵只是把近平面挪 0.05，肉眼和纯透视的单元测试
-都抓不住。D3 已经改成两行一张表，1.3 里记了完整的复现过程。**推论：阶段 3 动阴影
-（`orthoRH_ZO`）的时候，平面提取的符号问题会真的咬人，别指望阶段 1 的透视用例挡住它。**
+都抓不住。D3 已经改成两行一张表，1.3 里记了完整的复现过程。**阶段 3 的阴影 cascade 走
+`orthoRH_ZO`，平面提取的符号问题会真的咬人，别指望阶段 1 的透视用例挡住它。** 这次阴影剔除
+没再走一遍 Frustum 提取（光空间 XY 重叠），所以 D3 那个坑在这条路径上没有被踩到，但谁以后
+给 cascade 改成 `Frustum::fromViewProjection(ortho)` 就必须带着正交用例。
 
 顺带发现（不在本任务范围）：`task_system_test` 里「parallelFor 被至少两个线程跑过」那条断言
 偶发红，连跑 20 次复现 1 次。跟这次的改动无关，见 1.1。
@@ -344,7 +364,7 @@ G-Buffer 那两趟循环（材质常量预写 `:266` + 绘制 `:279`）也必须
 
 ### 阶段 2 · 相机剔除（G-Buffer + 拾取）
 
-- [ ] **2.1 可见集合进 `FrameContext`**（D7）
+- [x] **2.1 可见集合进 `FrameContext`**（D7）
   - 文件：`src/pipeline/frame_context.h`、`frame_context.cpp`
   - 做法：构造时按 `scene.view.projection * scene.view.view` 建 `Frustum`，对每个 draw 算一个
     bool 存 `std::vector<bool>`（或 `vector<uint8_t>`），暴露 `bool isVisible(size_t) const`。
@@ -352,29 +372,31 @@ G-Buffer 那两趟循环（材质常量预写 `:266` + 绘制 `:279`）也必须
     「有多少被画」在同一个循环里数才不会算重。
   - 验收：编译过；此时还没有消费者，行为不变。
 
-- [ ] **2.2 接到 `GBufferPass`**（D4）
+- [x] **2.2 接到 `GBufferPass`**（D4）
   - 文件：`src/pipeline/passes/gbuffer_pass.cpp:266`（材质常量趟）、`:279`（绘制趟）
   - 做法：两趟都加 `if (!frame.isVisible(index)) continue;`。绘制趟里在跳过时
     `++frame.statistics().culled`；**材质常量那趟不要数**，否则一个 draw 会被数两次。
     循环要改成带下标的形式（现在是 range-for）。
   - 验收：见 2.4。
 
-- [ ] **2.3 接到 `PickingPass`**（D4）
+- [x] **2.3 接到 `PickingPass`**（D4）
   - 文件：`src/pipeline/passes/picking_pass.cpp:278`
   - 做法：同上加跳过，**不数 `culled`**（那是 G-Buffer 的职责，拾取 pass 不是每帧都跑）。
     把 `:284` 那条「和 GBufferPass 逐条对齐地跳过」的注释更新成「包括可见性」。
   - 验收：见 2.4。
 
-- [ ] **2.4 阶段 2 的验收**
+- [x] **2.4 阶段 2 的验收**
   - `scene_editor` 打开一个场景，把相机转开让部分物体出画：播放器 / 编辑器的
     `%u culled` **不再是 0**，且 `draw_calls + culled` 等于场景里的 PBR submesh 总数。
   - **拾取一致性**：视锥边缘上点几下 —— 看得见的都点得到，点空处不选中东西。
     这是 D4 那条不变式的验收。
   - 相机转回来时 `culled` 回到 0（或接近），说明剔的是真在外面的东西。
+  - **已完成。**执行者 2026-09-03 在 `scene_editor` 里看过：转相机 `culled` 变、和守恒、
+    边缘拾取一致。编辑器状态栏为此加了 `culled` 一列（播放器 `--stats` 本来就有）。
 
 ### 阶段 3 · 阴影剔除（省下四遍全场景）
 
-- [ ] **3.1 `computeShadowCascades` 把每级的可见集合返回出来**（D5、D7）
+- [x] **3.1 `computeShadowCascades` 把每级的可见集合返回出来**（D5、D7）
   - 文件：`src/pipeline/shadow_cascades.h`、`shadow_cascades.cpp:158-165`
   - 做法：`ShadowCascadeResult` 加 `std::array<std::vector<uint8_t>, kShadowCascadeCount>
     caster_visible`（或一个打平的 bitset）。`:158` 那个已经在跑的 XY 重叠循环里，
@@ -383,13 +405,18 @@ G-Buffer 那两趟循环（材质常量预写 `:266` + 绘制 `:279`）也必须
   - 注释里必须写下 D5 那条依赖：**Z 方向之所以不用判，是因为 near/far 就是按 XY 重叠的
     投射体撑开的**（`:156-165`）。谁把 near/far 改成固定值，这条剔除就会剔掉合法投射体。
   - 验收：见 3.3。
+  - **代码完成。**打平存成 `kShadowCascadeCount × draws.size()` 一个 vector，而不是四个
+    vector —— 长度固定，展开也没多复杂。空盒单独置 1、不参与 near/far 收紧
+    （修了一个预存在的坑）。
 
-- [ ] **3.2 接到 `ShadowPass`**
+- [x] **3.2 接到 `ShadowPass`**
   - 文件：`src/pipeline/passes/shadow_pass.cpp:229`（外层 cascade 循环）、`:241`（内层 draw 循环）
   - 做法：内层加 `if (!computed.caster_visible[index][draw_index]) continue;`，跳过时
     `++frame.statistics().shadow_culled`。`renderer.h:45` 的 `FrameStatistics` 加
     `shadow_culled` 字段（D8）。
   - 验收：见 3.3。
+  - **代码完成。**`FrameStatistics` 加了 `shadow_culled`；编辑器状态栏和播放器 `--stats`
+    都显示。等 3.3 的画面比对。
 
 - [ ] **3.3 阶段 3 的验收 —— 必须有画面比对**
   - **`shadow_culled > 0`**（否则这一步等于没做），且四级总遍历数明显小于 `4 × submeshes`。

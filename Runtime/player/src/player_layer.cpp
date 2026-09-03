@@ -197,8 +197,9 @@ void PlayerLayer::drawStats() {
     const ImGuiIO& io = ImGui::GetIO();
     ImGui::Text("%.1f FPS (%.2f ms)", io.Framerate,
             io.Framerate > 0.0f ? 1000.0f / io.Framerate : 0.0f);
-    ImGui::Text("%u draws / %u submeshes / %u culled", m_last_statistics.draw_calls,
-            m_last_statistics.submeshes, m_last_statistics.culled);
+    ImGui::Text("%u draws / %u submeshes / %u culled / %u shadow culled",
+            m_last_statistics.draw_calls, m_last_statistics.submeshes, m_last_statistics.culled,
+            m_last_statistics.shadow_culled);
 
     if (m_world) {
         const auto entities = m_world->scene().view<scene::IDComponent>().size();
