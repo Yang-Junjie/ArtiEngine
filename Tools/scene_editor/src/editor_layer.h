@@ -33,7 +33,7 @@ class ViewportPanel;
 
 class EditorLayer final : public core::Layer {
 public:
-    explicit EditorLayer();
+    explicit EditorLayer(bool vsync = true);
     ~EditorLayer() override;
 
     void onAttach() override;
@@ -73,6 +73,7 @@ private:
 
     uint32_t m_frame_index{ 0 };
     rendering::FrameStatistics m_last_statistics;
+    bool m_vsync{ true };
 
     uint32_t m_viewport_width{ 0 };
     uint32_t m_viewport_height{ 0 };

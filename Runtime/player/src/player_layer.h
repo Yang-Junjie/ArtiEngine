@@ -39,6 +39,7 @@ struct PlayerOptions {
     std::filesystem::path manifest_file;
 
     bool show_stats{ false };
+    bool vsync{ true };
 };
 
 // 独立播放器的唯一一层：建渲染设备、开资产工作区、加载起始场景，然后每帧 tick + 提交。

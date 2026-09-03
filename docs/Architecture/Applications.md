@@ -122,6 +122,8 @@ exitToEdit()              world.scene().copyEntitiesFrom(snapshot)  原样拷回
 `common/` 放平台中立的接口头，各平台目录放实现，**分派在 CMake 层按平台选源文件**，
 所以实现里不带 `#ifdef`。目前只有 Windows 一支（`IFileDialog`）。
 
+`View / VSync` 切垂直同步，运行时重建 swapchain。启动参数 `--no-vsync` 一样。
+
 ## 3. arti_player
 
 `Runtime/player`。一层 `PlayerLayer`，只有胶水。
@@ -131,6 +133,7 @@ arti_player [options] [<project.artiproj>]
   --project <file>   要跑的项目。不给就用 exe 旁边那个唯一的 .artiproj
   --scene <file>     跑这个场景而不是 ProjectInfo::StartScene（相对路径按项目根解析）
   --stats            调试覆盖层（FPS、draw calls、实体数）
+  --no-vsync         关掉垂直同步（surface 支持的话走 IMMEDIATE）
   --help
 ```
 

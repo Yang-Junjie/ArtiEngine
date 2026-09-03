@@ -165,6 +165,11 @@ imgui.slang             UI
 `IntoUI` 模式下宿主应该按面板的像素尺寸调 `setSceneTargetSize()`，否则场景会按窗口尺寸渲染
 再被缩放。
 
+这和 Vulkan swapchain 的 present mode 不是一回事。后者在 `RenderDeviceCreateInfo::vsync`
+（默认开）：开着优先 MAILBOX，没有就 FIFO；关掉优先 IMMEDIATE。运行时 `setVsync()` 会重建
+swapchain。窗口模式下 DWM 仍可能把 MAILBOX / IMMEDIATE 拍回刷新率，那是合成器的事，
+不在这一层。编辑器菜单 `View / VSync`，播放器和 sample 用 `--no-vsync`。
+
 **tone mapping 独立成 pass 而不是塞进 `PresentPass`**，正是因为 `IntoUI` 下 `PresentPass`
 根本不跑：压缩必须发生在一张纹理里，两条呈现路径才能看到同一个画面。调试线排在 tonemap
 之后、`Output` 之前，也是为了让两条路径都看到带调试线的画面。

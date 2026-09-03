@@ -38,6 +38,7 @@ void PlayerLayer::onAttach() {
     auto surface_source = platform::createSDLVulkanSurfaceSource(app.getWindow());
     renderer::RenderDeviceCreateInfo device_info;
     device_info.application_name = "ArtiEngine Player";
+    device_info.vsync = m_options.vsync;
     m_render_device = std::make_unique<renderer::RenderDevice>(app.getWindow(),
             std::move(surface_source), device_info);
 
@@ -195,8 +196,11 @@ void PlayerLayer::drawStats() {
     }
 
     const ImGuiIO& io = ImGui::GetIO();
-    ImGui::Text("%.1f FPS (%.2f ms)", io.Framerate,
-            io.Framerate > 0.0f ? 1000.0f / io.Framerate : 0.0f);
+    const char* present = m_render_device
+            ? renderer::toString(m_render_device->swapchainInfo().present_mode)
+            : "?";
+    ImGui::Text("%.1f FPS (%.2f ms) %s", io.Framerate,
+            io.Framerate > 0.0f ? 1000.0f / io.Framerate : 0.0f, present);
     ImGui::Text("%u draws / %u submeshes / %u culled / %u shadow culled",
             m_last_statistics.draw_calls, m_last_statistics.submeshes, m_last_statistics.culled,
             m_last_statistics.shadow_culled);

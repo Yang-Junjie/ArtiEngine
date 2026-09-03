@@ -30,6 +30,7 @@ void printUsage() {
                "  --scene <file>    Scene to load instead of the project's StartScene.\n"
                "                    Relative paths resolve against the project root.\n"
                "  --stats           Show the debug overlay (FPS, draw calls, entity count).\n"
+               "  --no-vsync        Uncapped present (IMMEDIATE if the surface supports it).\n"
                "  --help            Print this message.\n",
             stderr);
 }
@@ -80,6 +81,10 @@ arti::player::PlayerOptions parseOptions(int argc, char** argv) {
         }
         if (argument == "--stats") {
             options.show_stats = true;
+            continue;
+        }
+        if (argument == "--no-vsync") {
+            options.vsync = false;
             continue;
         }
         // 需要值的选项：值缺了就是用法错误，不要静默当成开关。

@@ -72,7 +72,7 @@ std::filesystem::path uiFontPath() {
 
 } // namespace
 
-EditorLayer::EditorLayer() : Layer("EditorLayer") {}
+EditorLayer::EditorLayer(bool vsync) : Layer("EditorLayer"), m_vsync(vsync) {}
 
 EditorLayer::~EditorLayer() = default;
 
@@ -82,6 +82,7 @@ void EditorLayer::onAttach() {
     auto surface_source = platform::createSDLVulkanSurfaceSource(app.getWindow());
     renderer::RenderDeviceCreateInfo device_info;
     device_info.application_name = "ArtiEngine Scene Editor";
+    device_info.vsync = m_vsync;
     m_render_device = std::make_unique<renderer::RenderDevice>(app.getWindow(),
             std::move(surface_source), device_info);
 
@@ -308,6 +309,13 @@ void EditorLayer::drawMenuBar() {
             }
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("View")) {
+            bool vsync = m_render_device && m_render_device->vsync();
+            if (ImGui::MenuItem("VSync", nullptr, vsync, m_render_device != nullptr)) {
+                m_render_device->setVsync(!vsync);
+            }
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Edit")) {
             if (ImGui::MenuItem("Undo", "Ctrl+Z", false, false)) {
             }
@@ -371,8 +379,12 @@ void EditorLayer::drawToolbar() {
     ImGui::SameLine();
     // draws 和 culled 并排显示：两个数加起来应该等于场景里的 PBR submesh 总数，
     // 转相机的时候盯着这个和是不是不变，就能一眼看出剔除有没有算漏或算重。
-    ImGui::Text("| %.1f FPS | %u draws | %u culled | %u shadow culled", ImGui::GetIO().Framerate,
-            m_last_statistics.draw_calls, m_last_statistics.culled, m_last_statistics.shadow_culled);
+    const char* present = m_render_device
+            ? renderer::toString(m_render_device->swapchainInfo().present_mode)
+            : "?";
+    ImGui::Text("| %.1f FPS | %s | %u draws | %u culled | %u shadow culled",
+            ImGui::GetIO().Framerate, present, m_last_statistics.draw_calls,
+            m_last_statistics.culled, m_last_statistics.shadow_culled);
     if (m_context->isGameView() && !m_scene_renderer->hasCamera()) {
         ImGui::SameLine();
         ImGui::TextColored(ImVec4{ 1.0f, 0.4f, 0.3f, 1.0f },

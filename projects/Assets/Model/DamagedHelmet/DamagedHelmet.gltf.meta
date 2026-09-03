@@ -2,7 +2,7 @@ Version: 2
 Source:
   Path: Model/DamagedHelmet/DamagedHelmet.gltf
   ContentHash: 0
-  Size: 4537
+  Size: 4741
 Importer:
   Name: artiengine.GltfImporter
   Version: 1
