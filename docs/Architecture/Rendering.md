@@ -85,12 +85,12 @@ pass 包一层 adapter。这样 `RenderTargetSet::prepare()` 有了确定位置�
 | stage | pass | 干什么 / 为什么在这个位置 |
 | --- | --- | --- |
 | `EnvironmentBake` | `EnvironmentBakePass` | 纯 compute，不碰 framebuffer。IBL 烘焙。排最前是因为产物是 Lighting / Sky 的输入，而它自己不依赖任何渲染目标。按环境贴图句柄缓存，只有换贴图那帧真的烘 |
-| `Shadow` | `ShadowPass` | 方向光的级联阴影深度图：把几何按每一级的光源正交视锥重画一遍，只写深度。和 `EnvironmentBake` 同一个性质（产物是 Lighting 的输入、自己不依赖场景目标），所以排在它之后、`Clear` 之前 —— 那样「谁清场景目标」仍然只有 `ClearScenePass` 一处。没有投影光源或没有 draw 的帧整个跳过 |
+| `Shadow` | `ShadowPass` | 方向光的级联阴影深度图：把几何按每一级的光源正交视锥重画一遍，只写深度。**每级只画光空间 XY 上和这一级正交范围重叠的投射体**，不是整场景、也不是相机视锥里的东西（投射体可以在画面外，影子在画面内）。和 `EnvironmentBake` 同一个性质（产物是 Lighting 的输入、自己不依赖场景目标），所以排在它之后、`Clear` 之前 —— 那样「谁清场景目标」仍然只有 `ClearScenePass` 一处。没有投影光源或没有 draw 的帧整个跳过 |
 | `Clear` | `ClearScenePass` | 独立成 pass 而不是让第一个绘制 pass 顺手清屏 —— 靠约定就成了隐式耦合，改 pass 顺序会静默改变清屏行为 |
 | `GBuffer` | `GBufferPass` | 把材质属性编码进 G-Buffer + SceneDepth，一行光照都不算 |
 | `Lighting` | `DeferredLightingPass` | 全屏三角形读 G-Buffer + 深度，写 SceneColor。**整条管线里唯一求值 BRDF 的地方**，也是唯一采阴影图的地方（只作用在那个投影方向光的直接光项上，不乘 IBL） |
 | `Sky` | `SkyPass` | 排在 Lighting 之后：深度测试 LessOrEqual + 不写深度，只填没被物体覆盖的像素。反过来先画天空，每个被挡住的像素都白画一遍 |
-| `Picking` | `PickingPass` | 复用可见性做 ID 缓冲。排在 PostProcess 之前是因为它读深度、跟颜色无关，而读回是异步的 —— 早提交早能取。没有拾取请求的帧连 ID 缓冲都不建 |
+| `Picking` | `PickingPass` | 复用可见性做 ID 缓冲。和 G-Buffer **读同一份**相机可见位（`FrameContext::isVisible`），所以「看得见就点得到」。排在 PostProcess 之前是因为它读深度、跟颜色无关，而读回是异步的 —— 早提交早能取。没有拾取请求的帧连 ID 缓冲都不建 |
 | `PostProcess` | `TonemapPass` | 曝光 + ACES 拟合曲线（Narkowicz 2015），SceneColor（场景线性 HDR）→ DisplayColor（显示线性 LDR）。**不做 sRGB 编码**，那个由硬件在写 backbuffer 时完成 |
 | `DebugOverlay` | `DebugLinePass` | 画在 DisplayColor 上（tone mapping **之后**），所以「我给的颜色就是我看到的颜色」。深度测试复用 SceneDepth，被物体挡住的线看不见。没有线的帧连 shader 都不编译 |
 | `Output` | `PresentPass` | 把 DisplayColor 贴到 backbuffer。`IntoUI` 模式下整个跳过 |
@@ -200,8 +200,47 @@ renderer.drawWireSphere(center, radius, color, segments = 24);
 ## 8. FrameStatistics
 
 ```cpp
-uint32_t draw_calls;  // 场景里画了多少个 submesh。全屏 pass 和调试线不计入
+uint32_t draw_calls;     // 场景里画了多少个 submesh。全屏 pass 和调试线不计入
 uint32_t submeshes;
-uint32_t culled;      // 恒为 0 —— 剔除还没做
+uint32_t culled;         // 相机视锥剔掉的 PBR submesh 数。draw_calls + culled 守恒
+uint32_t shadow_culled;  // 四级 cascade 上跳过的 draw 次数之和，最大 4 × submeshes
 bool     rendered;
 ```
+
+`culled` 只由 `GBufferPass` 报：和 `draw_calls` 在同一个循环里数，才不会算重。拾取 pass
+不数 —— 它不是每帧都跑。`shadow_culled` 和 `culled` 加起来没有守恒式，两个视锥不是一回事。
+
+## 9. 视锥剔除
+
+`Frustum`（`include/frustum.h`）从 `view_projection` 按 Gribb-Hartmann 取六个朝内的平面，
+和 AABB 做保守相交（最内侧顶点都在某平面外侧才判不可见）。深度约定是 **ZO**
+（`perspectiveRH_ZO` / `orthoRH_ZO`），近平面取 `row2` 不是 NO 的 `row3 + row2`。
+写成 NO 公式对透视矩阵几乎看不出来（近平面只挪 0.05），对正交矩阵则几乎什么都不剔 ——
+正交正是阴影 cascade 用的。细节和反向验证过程在任务文档
+`docs/tasks/2026-09-03-frustum-culling.md` 的 D3。
+
+可见性**不算在抽取层**。`FrameContext` 构造时按 `projection * view` 建一次相机视锥，
+对每个 draw 写一个 `uint8_t`，pass 只读 `isVisible(index)`。算一次多处读，是为了让
+G-Buffer 和拾取不可能出现判据分歧 —— 那种分歧的症状是「看得见但点不到」，只在视锥边缘出现。
+
+三个 pass 用**不同**的视锥：
+
+| pass | 用哪个视锥 | 剔掉的后果 |
+| --- | --- | --- |
+| `GBufferPass` | 相机视锥 | 屏幕上不存在 —— 这就是目的 |
+| `PickingPass` | **同一个**相机视锥（同一份可见位） | 安全：剔掉的东西屏幕上也没有 |
+| `ShadowPass` | 每级 cascade 的**光空间 XY 范围** | 见下 |
+
+阴影不能用相机视锥：投射体可以完全在画面外而影子在画面内，拿相机视锥剔会让那些影子凭空
+消失，而且只在特定相机角度下。实际判据是光空间 AABB 和这一级正交范围的 XY 重叠 ——
+`computeShadowCascades` 收紧 near/far 时本来就在跑这个循环，重叠时顺手置位几乎零成本。
+**Z 方向不用再判**：near/far 就是按 XY 重叠的投射体撑开的，谁把 near/far 改成固定值，
+这条剔除就会把合法投射体剔掉。
+
+几个兜底一律朝「多画一个」倒：`isVisible` / `isCasterVisible` 越界返回 true；空
+`world_bounds` 当「不知道它在哪」处理，不剔。多画的代价是一次浪费的 draw call，少画的
+代价是物体或影子凭空消失。
+
+现在还是单线程。`Frustum::intersects` 是无状态纯函数，可见集合是「每个 draw 一个 bool」，
+接 `TaskSystem::parallelFor` 时只动 `FrameContext` 的构造，pass 的读取路径不用改。
+还没有做：遮挡剔除、BVH / 空间划分、每级 cascade 的 LOD。

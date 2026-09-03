@@ -34,7 +34,7 @@
 
 | 文件 | 状态 | 一句话 |
 | --- | --- | --- |
-| [2026-09-03-frustum-culling.md](2026-09-03-frustum-culling.md) | 进行中（阶段 1、2 完成，阶段 3 待画面验收） | 视锥剔除：`Frustum` 类型 + 接到 G-Buffer / 拾取 / 阴影四级，让 `culled` 不再恒为 0。阴影按光空间 XY 重叠判，不是相机视锥 |
+| [2026-09-03-frustum-culling.md](2026-09-03-frustum-culling.md) | 已完成 | 视锥剔除：`Frustum` 类型 + 接到 G-Buffer / 拾取 / 阴影四级，让 `culled` 不再恒为 0。阴影按光空间 XY 重叠判，不是相机视锥 |
 | [2026-09-02-artichoco-job-system.md](2026-09-02-artichoco-job-system.md) | 已完成 | 把 ArtiChoco 的 `TaskSystem` 做成真能用的 job system：进程级、句柄、依赖图、优先级、线程命名 + 第一个 ctest。**不接消费者**，只留接口 |
 | [2026-09-02-physics-box3d.md](2026-09-02-physics-box3d.md) | 已完成 | 接入 Box3D 做刚体物理 + Simulate 模式：盒子能掉下来、能堆叠；`FixedUpdate` 第一次真跑 |
 | [2026-09-02-directional-csm.md](2026-09-02-directional-csm.md) | 已完成 | 方向光级联阴影：4 级、拟合相机视锥、texel snapping、3×3 PCF、shadow distance |

@@ -178,10 +178,12 @@ RenderSceneExtractor::extract(scene, gpu_assets, renderer, target) → const Ren
 
 ### 目前不做的
 
-- **没有视锥剔除**。`world_bounds` 每帧都算好了、`Renderer::meshInfo()` 也能拿到局部包围盒，
-  但没有人拿它们做剔除，`FrameStatistics::culled` 恒为 0。
 - **没有排序 / 批合并**。`draws` 就是遍历顺序。
 - **`MeshInfo` 按 `MeshHandle` 缓存在抽取器里**，避免每帧对每个实体查一次渲染器。
+
+视锥剔除不在抽取这一层做 —— 见 [Rendering.md](Rendering.md) 第 9 节。抽取器只负责把
+`world_bounds` 填上（`MeshInfo::bounds.transformed(world)`），可见性由 `FrameContext` 在
+提交时按相机视锥算一次。
 
 ## 5. 场景文件
 

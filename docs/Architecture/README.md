@@ -254,9 +254,9 @@ cmake --build --preset debug
 
 | 空缺 | 现状与接缝 |
 | --- | --- |
-| 视锥剔除 | `FrameStatistics::culled` 恒为 0。接缝已留：抽取时算好 `DrawItem::world_bounds`，`Renderer::meshInfo()` 能拿到局部包围盒（顶点数据已经不在 CPU 侧） |
-| 阴影的剩余部分 | 方向光的级联阴影已经有了（4 级、拟合视锥、texel snapping、3×3 PCF、slope-scaled bias、shadow distance + 淡出）。还没有的：点光 cubemap 阴影、聚光阴影、cascade 之间的过渡混合（Godot 的 `blend_splits` 默认也是关的，所以级间能看出接缝）、软阴影（PCSS / VSM / 硬件比较采样器） |
-| 阴影的视锥剔除 | 四级 cascade 意味着几何一帧画五遍（G-Buffer + 4 级），而没有剔除时**每级都把整个场景画一遍**，包括那一级正交范围外的物体。剔除要按每级的光锥做，不是按相机视锥 |
+| 视锥剔除 | **已做**（相机 AABB vs 视锥 + 阴影光空间 XY 重叠）。还没有的：遮挡剔除、BVH / 空间划分、每级 cascade 的 LOD、并行化（接缝已留，见 Rendering.md 第 9 节） |
+| 阴影的剩余部分 | 方向光的级联阴影已经有了（4 级、拟合视锥、texel snapping、3×3 PCF、slope-scaled bias、shadow distance + 淡出）。每级按光空间 XY 重叠剔投射体，不再四级全场景画一遍。还没有的：点光 cubemap 阴影、聚光阴影、cascade 之间的过渡混合（Godot 的 `blend_splits` 默认也是关的，所以级间能看出接缝）、软阴影（PCSS / VSM / 硬件比较采样器） |
+| 阴影的视锥剔除 | **已做**。判据是每级 cascade 的光空间 XY 重叠，**不是**相机视锥。Z 方向不另判：near/far 就是按 XY 重叠的投射体撑开的。详见 Rendering.md 第 9 节 |
 | 源内容变更检测 | `.meta` 的 `ContentHash` / `Size` / `Importer.Version` **只写不读**。目前只有 artifact 缺失才触发重导，改了源文件内容必须手动重导 |
 | 多线程的消费者 | **任务系统本身已经有了**（`arti::core::TaskSystem`，enkiTS 封装：fork-join、带句柄的异步任务、钉线程任务、`TaskGraph` 依赖图，文档见 `core/task/README.md`），但**一个真实消费者都还没接**。每个接入点的位置和它该调的 API 列在下面那张表里 |
 | 脚本 / 音频 | 完全没有。`Update` / `LateUpdate` 两个 stage 空着在跑，是它们现成的挂载点（`FixedUpdate` 现在被物理占了） |
@@ -285,7 +285,7 @@ cmake --build --preset debug
 | 资产 reconcile 的 scan | `AssetPipeline::planReconcile()` / `scan()` | `parallelFor(count, fn, {min_range})`。`scan()` 是纯读、无共享写，换过去语义不变 |
 | 资产导入的拓扑序 | `AssetPipeline::reconcile()` | `TaskGraph`：一个源文件一个节点，依赖边就是拓扑序 |
 | 纹理 / 网格解码 + 上传 | `GPUAssetCache` | `TaskGraph`：解码节点在 worker 上，上传节点 `addPinnedAfter` 钉在渲染线程。Rendering.md 第 1 节已经把这个界限划好了 |
-| 视锥剔除 / 抽取 | `RenderSceneExtractor::extract()` | `parallelForRanges` + `threadIndex()` 做每线程 bucket（`DrawItem::world_bounds` 每帧已经算好） |
+| 视锥剔除并行化 | `FrameContext` 构造（现在单线程扫 `draws` 填 `m_camera_visible`） | `parallelForRanges`。`Frustum::intersects` 是无状态纯函数，pass 只读结果，读路径不用改 |
 | 物理多线程 | `PhysicsSystem` → Box3D 的 `b3EnqueueTaskCallback` | `submitParallelFor` 拿句柄 + `wait(handle)` —— Box3D 的任务回调要的正是这个形状 |
 | 渲染线程 | 三个 exe 的 layer | `TaskSystemConfig::external_thread_count` + `registerExternalThread()` + 长驻 `submitPinned` |
 
@@ -295,7 +295,7 @@ cmake --build --preset debug
 | --- | --- |
 | [Assets.md](Assets.md) | 四种资产类型、artifact 格式、importer / loader、`AssetRuntime` 与 `AssetPipeline` 的分工、GPU 缓存、builtin |
 | [Scene.md](Scene.md) | ECS 基座、六个游戏组件、序列化名、`World` 的 tick、抽取成 `RenderScene` |
-| [Rendering.md](Rendering.md) | 渲染三层、`RenderScene` 契约、延迟管线的 stage 顺序与理由、两种呈现模式、拾取、调试线 |
+| [Rendering.md](Rendering.md) | 渲染三层、`RenderScene` 契约、延迟管线的 stage 顺序与理由、两种呈现模式、拾取、调试线、视锥剔除 |
 | [Applications.md](Applications.md) | 编辑器结构与 Play 模式、独立播放器、CLI 与打包发布 |
 
 上游文档（在 submodule 里，讲框架本身）：

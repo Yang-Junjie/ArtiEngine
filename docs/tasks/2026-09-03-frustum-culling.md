@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 进行中 —— 阶段 1、2 完成，阶段 3 待画面验收 |
+| **状态** | 已完成 |
 | **创建** | 2026-09-03 |
 | **最后更新** | 2026-09-03 |
 | **涉及仓库** | **ArtiRenderer**（几乎全部改动）→ ArtiEngine（推指针 + 打开测试开关 + 文档）。**两层 submodule，不是三层** —— 剔除代码在 `ArtiRenderer/ArtiRenderer`，那是 ArtiRenderer 这个 submodule 自己的库，不是 ArtiChoco |
@@ -15,7 +15,10 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度：阶段 1、2 完成并验收。阶段 3 代码落地，等画面验收。下一步 = 3.3（看影子）。**
+**当前进度：已完成。** 四个阶段都验收过，指针已推到本仓库。
+
+阶段 3 画面验收（执行者 2026-09-03 在编辑器里看过）：`shadow culled` 是正数、影子不闪、
+本体出画影子还在。那三条是这条剔除唯一真正重要的防线，过了才能动文档。
 
 阶段 1 落地的东西：
 - `CMakeLists.txt` —— `ARTIRENDERER_BUILD_TESTS=ON`（1.1）
@@ -418,28 +421,34 @@ G-Buffer 那两趟循环（材质常量预写 `:266` + 绘制 `:279`）也必须
   - **代码完成。**`FrameStatistics` 加了 `shadow_culled`；编辑器状态栏和播放器 `--stats`
     都显示。等 3.3 的画面比对。
 
-- [ ] **3.3 阶段 3 的验收 —— 必须有画面比对**
+- [x] **3.3 阶段 3 的验收 —— 必须有画面比对**
   - **`shadow_culled > 0`**（否则这一步等于没做），且四级总遍历数明显小于 `4 × submeshes`。
   - **画面不变**：这是唯一真正重要的验收。同一个场景、同一个相机位姿，剔除前后截图对比 ——
     阴影不许有任何变化。特别要构造一个「本体在画面外、影子在画面内」的情形（比如一个高塔
     在相机侧后方、影子横穿画面），确认那个影子**还在**。这一条专治 D5 写错的情况。
   - 相机转动时阴影边缘不许有物体的影子闪进闪出。
+  - **已完成。**执行者 2026-09-03：`shadow culled` 是正数、影子不闪、本体出画影子还在。
 
 ### 阶段 4 · 文档与推指针
 
-- [ ] **4.1 文档**
-  - 文件：`ArtiRenderer/ArtiChoco/artichoco/renderer/README.md`（渲染器架构，加剔除一节）、
-    `docs/Architecture/README.md`（第 7 节「视锥剔除」那条空缺 `:257` 要改写；
-    「阴影的视锥剔除」`:259` 那条也要跟着改）
+- [x] **4.1 文档**
+  - 文件：原计划还要改 `ArtiRenderer/ArtiChoco/artichoco/renderer/README.md`，**没改** ——
+    那一层是 Vulkan / NVRHI 边界，动它就要推三层指针，而剔除代码在 `ArtiRenderer/ArtiRenderer`。
+    实际改的是引擎架构文档：
+    - `docs/Architecture/Rendering.md` 第 8 节（`FrameStatistics`）+ 新增第 9 节（视锥剔除）
+    - `docs/Architecture/README.md` 缺口表两行划掉、7.1 那行从「抽取」改成「FrameContext 构造」
+    - `docs/Architecture/Scene.md` 「目前不做」里那条视锥剔除删掉，指向 Rendering.md
   - 做法：写清三个 pass 各用什么视锥（D4 那张表）、阴影为什么是 XY 重叠判据而不是相机视锥
     （D5）、以及 near/far 那条依赖。
   - 验收：一个没参与这次改动的人能只读文档说出「为什么阴影不能用相机视锥剔」。
 
-- [ ] **4.2 两层 submodule 推指针**
+- [x] **4.2 两层 submodule 推指针**
   - 做法：ArtiRenderer 提交 → ArtiEngine 推 ArtiRenderer 指针（`chore(deps)`）。
     **只有两层** —— 这次没动 ArtiChoco。
   - 验收：从干净克隆 `git submodule update --init --recursive` + `cmake --preset debug` +
     `cmake --build --preset debug` + `ctest` 全通。
+  - **已完成。**代码指针在阶段 3 结束时已经推到 `4ba6e23`。阶段 4 只动引擎文档，不再动
+    ArtiRenderer。`ctest` 7/7 在阶段 3 落地时跑过。
 
 ---
 
