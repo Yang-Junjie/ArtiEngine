@@ -369,7 +369,10 @@ void EditorLayer::drawToolbar() {
     }
 
     ImGui::SameLine();
-    ImGui::Text("| %.1f FPS | %u draws", ImGui::GetIO().Framerate, m_last_statistics.draw_calls);
+    // draws 和 culled 并排显示：两个数加起来应该等于场景里的 PBR submesh 总数，
+    // 转相机的时候盯着这个和是不是不变，就能一眼看出剔除有没有算漏或算重。
+    ImGui::Text("| %.1f FPS | %u draws | %u culled", ImGui::GetIO().Framerate,
+            m_last_statistics.draw_calls, m_last_statistics.culled);
     if (m_context->isGameView() && !m_scene_renderer->hasCamera()) {
         ImGui::SameLine();
         ImGui::TextColored(ImVec4{ 1.0f, 0.4f, 0.3f, 1.0f },
