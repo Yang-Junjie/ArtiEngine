@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 进行中 —— 阶段 1 完成并验收 |
+| **状态** | 已完成 —— 第一层做完并验收；6.5 半完成（`test_app` 开工前就编不过，与本任务无关） |
 | **创建** | 2026-09-02 |
 | **最后更新** | 2026-09-03 |
 | **涉及仓库** | **ArtiChoco**（几乎全部改动）→ ArtiRenderer（推指针）→ ArtiEngine（推指针 + 架构文档）。三层 submodule，见「风险与注意」 |
@@ -15,7 +15,17 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度：阶段 1 全部完成并验收。下一步 = 阶段 2 的 2.1（槽位池）。**
+**结论：第一层做完了。** `TaskSystem` 现在是进程级单例，有句柄、grain size、三档优先级、
+pinned、外部线程、`TaskGraph`。核心验收（6.2）过了，而且反向验证过不是空转。没有接任何
+真实消费者 —— 那是层二，接口表在架构文档 7.1。
+
+**6.5 半完成**：`render_system.cpp` 已换新 API；`test_app` 目标整体编不过，三个错误在
+NVRHI 迁移（`9287849`）时就有，本任务开工前的 `ab310fc` 里一字不差。不修。
+
+指针：ArtiChoco `ba93e74` → ArtiRenderer `6fa9615`。还没 push。
+
+**本任务的核心验收（6.2）已经过了，而且验证过它不是空转的**：把 `min_range` 临时改成
+`kCount`（逼成一个分片）之后那条断言确实变红（「实际只有 1 个」），改回 512 又变绿。
 
 开工前那件事已经办了：`vkGetDeviceProcAddr` 的改动单独提交在 ArtiChoco 的 `ab310fc`，
 指针也一路推上来了（ArtiRenderer `fc266de`、ArtiEngine `3e25a8c`）。
@@ -49,6 +59,43 @@ clang 22.1.3 能自己找到 MSVC 的头和库，**不需要先跑 vcvars64**。
   `Tools/asset_tools/tests/asset_pipeline_smoke.cpp` 各自在自己的 `Logger::init()` 旁边补了一对。
 - `Application::m_task_system` 和那个前向声明都删了。
 
+### 阶段 2 的实际形状，以及一个 D3 没写到的坑
+
+`task/task_pool.{h,cpp}`（`arti::core::detail::TaskPool`）。`TaskHandle` 放在
+`task_system.h` 里（它是公开 API 的一部分），池子的头 include 它，`TaskSystem` 用
+`unique_ptr<detail::TaskPool>` 持有以打断循环包含。
+
+**D3 漏了一条，实现时才发现，很值得记住**：enkiTS 是在 `AddTaskSetToPipe` 里才把
+`m_RunningCount` 抬起来的，所以**任务在入队之前 `GetIsComplete()` 就是 `true`**。
+如果 `insert()` 之后、`AddTaskSetToPipe()` 之前另一个线程触发了回收扫描，这个还没入队的任务
+会被当成「已完成」回收掉，句柄立刻失效。所以槽位多了一个 `launched` 标记：
+
+```
+insert()（槽位 = pending，扫描跳过）→ AddTaskSetToPipe() → markLaunched()
+```
+
+代价是每次 submit 两次进出池子的锁。**没有走「持锁期间入队」那条路**：
+`AddTaskSetToPipe` 在管道满时会**当场把任务跑掉**，那个任务要是又来 submit，
+持着池子的锁就死锁了。
+
+另外两处实现上的选择：
+
+- **回收扫描只在空闲表空了才做**。每次 insert 都全扫的话，在途任务多时是 O(n²)。
+- **`slotCount()` 通过 `TaskSystem::taskSlotCount()` 暴露给测试**。没有它，「泄漏修好了」
+  这件事就只能靠读代码相信。
+
+### 阶段 2 的验收
+
+`ctest` 三个仍全绿（`task_system_test` 0.41s —— 涨的那 0.34s 就是十万次 submit/wait）。
+三条新断言：
+
+1. 十万次 submit + 逐个 wait，`taskSlotCount()` 结束时有上界（逐个等的话在途只有一个，
+   所以实际就是 1）。这是旧 `m_pending` 无界增长的回归。
+2. 陈旧句柄上 `wait` / `isComplete` 不崩、报完成。**这条测试自带一个防空转的断言**：
+   先断言第二个任务确实复用了同一个槽位且世代号 +1，否则「陈旧句柄」根本没形成，
+   后半个测试是白跑的。
+3. `waitForAll()` 之后 256 个句柄全部报完成。
+
 ### 和文档不一样的四处（都记着理由）
 
 1. **把 6.1（测试目标）提前到阶段 1 之后做了。** 照原计划测试排在最后，那意味着阶段 2～5 一共
@@ -65,6 +112,101 @@ clang 22.1.3 能自己找到 MSVC 的头和库，**不需要先跑 vcvars64**。
    **之所以能做到确定性**：worker 是在 `init` 返回之前就起好名的，不依赖任务落在哪个线程上。
 4. **1.2 的验收原文写的是 `workerCount()`，但那个函数要到 4.2 才有**，所以实际断的是
    `taskThreadCount() == worker_count + 1`。4.2 做完后把断言换成 `workerCount()`。
+
+### 阶段 3 的实际形状
+
+`TaskPriority::{High,Normal,Low}` → `TASK_PRIORITY_{HIGH,MED,LOW}`。`ParallelForOptions{min_range, priority}`。
+阻塞版 `parallelFor` / `parallelForRanges` 用栈上 `TaskSet`（不进池）；异步版
+`submitParallelFor` / `submitParallelForRanges` 走 `launch()`。`min_range == 0` 夹到 1。
+
+**比清单多出来的 `parallelForRanges`**：逐元素那个是它的糖。层二的剔除 / 抽取要用
+`thread_index` 做每线程 bucket，没有 range 回调就只能自己再切一遍。
+
+### 阶段 3 的验收
+
+`ctest` 三个仍全绿。新断言：`parallelFor` 每个下标写一次；`min_range = count` 只出一个
+partition；`min_range = 0` 仍覆盖全部；`submitParallelFor` 拿句柄 wait 后结果正确；
+三档优先级都能提交并完成（效果不断言，D5）。
+
+### 阶段 4 的实际形状
+
+- 旧 `pinned` / `launchPinned` / `waitForPinnedTask` / 单槽 `m_pinned_task` 删掉。
+  `submitPinned` 走同一个池，`AddPinnedTask` 之后 `markLaunched`。
+- `taskThreadCount()` 改名 `threadCount()`。`workerCount()` **不是** `threadCount()-1`：
+  有 `external_thread_count` 时那个公式会把外部槽位算进去。实际返回
+  `GetConfig().numTaskThreadsToCreate`。
+- `threadIndex()` 转发 `GetThreadNum()`；未注册线程是 `kNoThread`（= enki 的
+  `NO_THREAD_NUM`，头文件不 include enkiTS）。
+- `registerExternalThread` / `deregisterExternalThread` 原样转发。
+- **6.5 提前做了一半**：`examples/test_app/render_system.{h,cpp}` 的 `launchPinned` /
+  `waitForPinnedTask` 换成了 `submitPinned` + `wait`。旧 API 已经不在了，不换它编不过。
+  `verifyTaskSystem()` 那个「4096 次乘 2」还留着，阶段 6 再改活量。
+
+enkiTS 的线程编号：0 = 调用线程；`[1, 1+external)` = 外部槽位；再往后才是它自己建的
+worker。所以 `submitPinned(1, ...)` 在 `external_thread_count == 0` 时钉的是第一个
+worker，有外部槽位时钉的是第一个外部槽。`test_app` 现在没留外部槽，钉 1 仍然是 worker。
+
+### 阶段 4 的验收
+
+`ctest` 三个仍全绿（`task_system_test` 0.43s）。新断言：`submitPinned(1)` 函数体里
+`threadIndex()==1`；连续两次 `submitPinned(1)` 都跑到（旧单槽 UAF 的回归）；
+`submitPinned(0)` 落在调用线程（`WaitforTask` 会顺手跑本线程 pinned 队列，不需要单独泵）；
+`std::thread` 注册后能 `submit`/`wait`，注销回到 `kNoThread`；没留槽位时注册失败；
+有外部槽位时 `workerCount()` 仍是配置的 worker 数。
+
+### 阶段 5 的实际形状
+
+`task/task_graph.{h,cpp}`。`TaskGraphNode` 只是图内下标，和 `TaskHandle` 刻意不同型。
+`add` / `addAfter` / `addParallelFor` / `addParallelForAfter` / `addPinned` / `addPinnedAfter`，
+提交入口是 `TaskSystem::submit(TaskGraph&&)`。
+
+- **整张图 = 一个池槽位。** `TaskGraph::Storage` 自己就**继承** `enki::ICompletable`，
+  它同时是「存储体」和「隐式终结节点」。省掉一层间接，而且池子里那个
+  `shared_ptr<ICompletable>` 指的就是终结节点 —— `wait(h)` 直接等它。
+- **前驱只能是已经建过的节点**（`pred.index >= node.index` 就抛）。这顺手把自环和后向边
+  挡在建图阶段，代价是不支持「先声明后填」的建图顺序 —— 现在没有消费者需要那个。
+- **`Dependency` 存在节点里、用 `vector` 且建图期间不删**。它是侵入式链表节点，
+  移动会改前驱的 `m_pDependents`，所以只 `emplace_back` + `SetDependency`，不 erase。
+- 提交顺序：**先校验（pinned 下标越界、非空图但没有根）→ 连终结边 → 入池 → 只入队根节点
+  → `markLaunched`**。校验放在入池之前，抛出去的时候不会留下一个占着的槽位。
+
+**空图是合法的**：终结节点没有依赖 → `m_RunningCount` 是 0 → `GetIsComplete()` 直接为真，
+`wait()` 立刻返回。
+
+### 阶段 5 的验收
+
+`ctest` 三个仍全绿。三条新断言：建图不 submit 时什么都不跑；菱形 `A → {B,C} → D` 的顺序
+正确且 D 只跑一次（用原子标志断言，没有 sleep）；`decode(worker) → upload(pinned 1)`
+两节点图跑通且 upload 体内 `threadIndex() == 1` —— 这就是层二「解码 + 上传」那一行的形状。
+
+### 阶段 6.3 / 6.4 的实际形状
+
+- **6.3**：`testShutdownWithTasksInFlight` —— 512 个故意不 wait 的 `submit`，然后 `shutdown()`，
+  断言全跑完。这是 `~TaskSystem` 里 `WaitforAllAndShutdown()` 排在成员析构之前的回归
+  （enkiTS 的 `~ICompletable` 有 `GetIsComplete()` 断言）。TSan 没跑：
+  `clang++ -fsanitize=thread` 在 `x86_64-pc-windows-msvc` 上报 `unsupported option`。
+- **6.4**：完整文档写在 `artichoco/core/task/README.md`（跟 `asset/` `scene/` `renderer/`
+  一样按模块放）。根 `ArtiChoco/README.md` 原先是 0 字节空壳，补了一段入口 + 解码/上传
+  两节点图，而不是凭空编一份总览。架构文档第 7 节那一行改名成「多线程的消费者」，
+  层二那张表作为 7.1 搬过去。
+
+### 6.5 只能做到一半 —— `test_app` 在本任务开工前就编不过
+
+`ARTICHOCO_BUILD_EXAMPLES=ON` 单独配一次之后（`cmake -S . -B <dir> -G Ninja -DCMAKE_BUILD_TYPE=Debug
+-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DARTICHOCO_BUILD_EXAMPLES=ON`）：
+
+- **`render_system.cpp` 编过了** —— 这是本任务改的那个文件（`launchPinned` / `waitForPinnedTask`
+  换成 `submitPinned` + `wait`），也是 6.5 真正要验的东西。
+- **`test_app_layer.cpp` 三个错误，与本任务无关**，是 NVRHI 迁移（`9287849`）时 example 没跟上：
+  - `no member named 'nvrhiResourceSmoke' in 'RenderDevice'`（:336）
+  - `no member named 'nvrhiComputeShaderSmoke' in 'RenderDevice'`（:339）
+  - `invalid argument type 'RenderFrameResult' to unary expression`（:699）—— `renderFrame()`
+    现在返回结构体（`render_device.h:43,75`），调用点还在 `if (!...)`。
+  前两个函数只存在于 `render_device.cpp` 的 Impl 里（`:55-56`），公开头上没有。
+
+**证据**：这三处调用在 `ab310fc`（本任务第一个提交之前）里一字不差地存在。所以
+`test_app` 目标整体编不过**不是这次改出来的**，也不该由这个任务顺手修 —— 那是渲染器
+API 漂移，够单独一个任务。`verifyTaskSystem()` 的活量（现状第 11 条）也因此没动。
 
 ### 待定项已定
 
@@ -467,21 +609,21 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
 
 ### 阶段 2 · 句柄与回收（修掉泄漏和悬垂）
 
-- [ ] **2.1 槽位池**
+- [x] **2.1 槽位池**
   - 文件：`artichoco/core/task/task_pool.{h,cpp}`（新建，只在 `task_system.cpp` 里用）
   - 做法：按 D3 —— `std::vector<Slot>` + 空闲表 + 一把 `std::mutex`；
     `Slot { std::shared_ptr<enki::ICompletable> task; uint32_t generation; bool in_use; }`。
     `allocate()` 先扫一遍在用槽位回收已完成的（世代号 +1），再取空闲槽或增长。
   - 验收：单元测试里连续 allocate / 等待 / allocate 十万次，`slotCount()` 有上界。
 
-- [ ] **2.2 `submit` 返回句柄，删掉 `m_pending`**
+- [x] **2.2 `submit` 返回句柄，删掉 `m_pending`**
   - 文件：`task_system.{h,cpp}`
   - 做法：`submit(Fn&&, TaskPriority)` → 建 `shared_ptr<enki::TaskSet>`、设
     `m_Priority`、进池拿句柄、`AddTaskSetToPipe`。**`m_pending` 和它那把
     `m_pending_mutex` 整个删掉。**
   - 验收：现状第 4 条那个泄漏不复存在（2.1 的上界测试就是证明）。
 
-- [ ] **2.3 `wait` / `isComplete`**
+- [x] **2.3 `wait` / `isComplete`**
   - 文件：同上
   - 做法：**先持锁校验世代号并把 `shared_ptr` 拷出来，解锁，然后**才调
     `m_scheduler->WaitforTask(ptr.get())`。持锁调 `WaitforTask` 是死锁 ——
@@ -490,7 +632,7 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
   - 验收：陈旧句柄上调 `wait` / `isComplete` 不崩、报完成；正常句柄 `wait` 之后
     `isComplete` 为真。
 
-- [ ] **2.4 `waitForAll` 收口**
+- [x] **2.4 `waitForAll` 收口**
   - 文件：同上
   - 做法：`m_scheduler->WaitforAll()` + 扫一遍池子回收。头文件注释里把 enkiTS 的限制
     （`TaskScheduler.h:356-357`）写清楚：这是屏障 / 关停用的，不是通用同步。
@@ -498,7 +640,7 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
 
 ### 阶段 3 · parallelFor、优先级、grain size
 
-- [ ] **3.1 `ParallelForOptions` 和阻塞版 `parallelFor`**
+- [x] **3.1 `ParallelForOptions` 和阻塞版 `parallelFor`**
   - 文件：`task_system.{h,cpp}`
   - 做法：`min_range` 填给 `enki::TaskSet` 的 `m_MinRange`，`priority` 填 `m_Priority`。
     阻塞版仍然可以用栈上的 `TaskSet`（不进池）—— 生命周期由这个函数自己框住，
@@ -506,12 +648,12 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
   - 验收：`min_range = count` 时**只**产生一个 partition（在 lambda 里记录被调用的
     partition 数来断言）。
 
-- [ ] **3.2 异步版 `submitParallelFor`**
+- [x] **3.2 异步版 `submitParallelFor`**
   - 文件：同上
   - 做法：和 `submit` 同一条路（进池、返回句柄），只是 `TaskSet` 带 `setSize` 和 `m_MinRange`。
   - 验收：拿到句柄、`wait` 之后结果正确；这是物理桥（层二）要的形状。
 
-- [ ] **3.3 `TaskPriority` 三档映射**
+- [x] **3.3 `TaskPriority` 三档映射**
   - 文件：同上
   - 做法：`High/Normal/Low` → `TASK_PRIORITY_HIGH/MED/LOW`。头文件注释写明 enki 有五档、
     我们只暴露三档，以及 `priorityOfLowestToRun_` 这半边留着没做（D5）。
@@ -520,20 +662,20 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
 
 ### 阶段 4 · pinned 任务与外部线程
 
-- [ ] **4.1 `submitPinned` 走池，删掉 `launchPinned` / `waitForPinnedTask` / `pinned`**
+- [x] **4.1 `submitPinned` 走池，删掉 `launchPinned` / `waitForPinnedTask` / `pinned`**
   - 文件：`task_system.{h,cpp}`
   - 做法：按 D8。`shared_ptr<enki::LambdaPinnedTask>` 进池、`AddPinnedTask`、返回句柄。
     旧的三个 API 删掉 —— 一次性用 `submitPinned` + `wait`，长驻用 `submitPinned` 不 wait。
   - 验收：连续两次 `submitPinned(1, ...)` 不再 use-after-free（现状第 7 条的回归用例）。
 
-- [ ] **4.2 `threadIndex` / `threadCount` / `workerCount` / `runPinnedTasks`**
+- [x] **4.2 `threadIndex` / `threadCount` / `workerCount` / `runPinnedTasks`**
   - 文件：同上
   - 做法：`threadIndex()` → `GetThreadNum()`，未注册线程返回 `kNoThread`（用 enki 的
     `NO_THREAD_NUM`）。`taskThreadCount()` 改名 `threadCount()`，补 `workerCount()`。
     `runPinnedTasks()` 直接转发。
   - 验收：`submitPinned(k, ...)` 的函数体里 `threadIndex() == k`。
 
-- [ ] **4.3 外部线程注册**
+- [x] **4.3 外部线程注册**
   - 文件：同上
   - 做法：`registerExternalThread()` / `deregisterExternalThread()` 转发 enkiTS 的同名调用
     （`TaskScheduler.h:401-409`）。配置里的 `external_thread_count` 填 `numExternalTaskThreads`。
@@ -543,14 +685,14 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
 
 ### 阶段 5 · 依赖图 `TaskGraph`
 
-- [ ] **5.1 `TaskGraph` 的建图 API**
+- [x] **5.1 `TaskGraph` 的建图 API**
   - 文件：`artichoco/core/task/task_graph.{h,cpp}`（新建）
   - 做法：按 D4。`add` / `addParallelFor` / `addPinned` / `addAfter({preds}, fn)`
     返回图内节点标识（**不是** `TaskHandle` —— 图还没提交，别让两种 ID 长得一样）。
     节点和它们的 `Dependency` 对象全部存在图里。
   - 验收：建图不提交时什么都不跑。
 
-- [ ] **5.2 提交整张图**
+- [x] **5.2 提交整张图**
   - 文件：`task_graph.cpp` + `task_system.{h,cpp}`
   - 做法：加隐式终结节点（依赖所有出度为 0 的节点），整个存储体一个 `shared_ptr` 进池、
     返回一个 `TaskHandle`；然后只把入度为 0 的根节点 `AddTaskSetToPipe`。
@@ -558,7 +700,7 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
   - 验收：菱形图 `A → {B, C} → D`：断言 B / C 都在 A 之后、D 在 B 和 C 都完成之后、
     且 D 只执行一次。用原子计数 + 时间戳断言，不要用 sleep 凑。
 
-- [ ] **5.3 图里混 pinned 节点**
+- [x] **5.3 图里混 pinned 节点**
   - 文件：同上
   - 做法：确认 `IPinnedTask` 作为依赖方也能被 `OnDependenciesComplete` 正常启动
     （`TaskScheduler.h:202` 说明它有这条路）。
@@ -574,7 +716,7 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
   - 验收：`ctest` 里出现 `task_system_test` 并通过；`physics_smoke` /
     `asset_pipeline_smoke` 仍绿。
 
-- [ ] **6.2 「真的在多线程跑」那条断言**
+- [x] **6.2 「真的在多线程跑」那条断言**（**并且反向验证过它会失败**，见交接区）
   - 文件：同上
   - 做法：一个 `parallelFor(N, ...)`，每次迭代把 `threadIndex()` 记进一个
     `std::set`（或每线程 bucket 后合并）。`workerCount() > 0` 时断言**见过至少两个不同的下标**。
@@ -584,7 +726,7 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
   - 验收：断言通过；并且把 `worker_count = 1` 再跑一次，这条断言应当被跳过而不是失败
     （单 worker 下只有一个线程是正确行为）。
 
-- [ ] **6.3 其余测试用例**
+- [x] **6.3 其余测试用例**（TSan 没跑 —— clang-cl 在 Windows 上不支持 `-fsanitize=thread`）
   - 文件：同上
   - 做法：至少覆盖 —— 未 init 时 `get()` 抛；`parallelFor` 结果正确；`min_range = count`
     只一个 partition；池子上界；陈旧句柄安全；菱形依赖图顺序 + D 只跑一次；
@@ -593,15 +735,16 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
   - 验收：全部通过。有条件的话再用 clang 的 TSan 跑一遍（`-fsanitize=thread`）——
     过不了也不阻塞，但结论要记进交接区。
 
-- [ ] **6.4 文档**
-  - 文件：`ArtiChoco/README.md`（新增「任务系统」一节 —— 现在那份 README 里
-    **`task` / `thread` / `线程` 一个字都没有**）、
-    `docs/Architecture/README.md`（第 7 节「明确未做」里，「资产管线多线程」那条改写成
-    「job system 已经有了，还没有消费者」，并把层二那张表的入口引过来）
+- [x] **6.4 文档**
+  - 文件：`ArtiChoco/README.md`（根 README 原先是空文件，补了一段任务系统入口 + 解码/上传
+    两节点图）、`artichoco/core/task/README.md`（完整 API：生命周期、线程编号、grain size、
+    句柄、`waitForAll` 的限制、三档优先级、`TaskGraph`、D10 四件不做的事）、
+    `docs/Architecture/README.md`（第 7 节「资产管线多线程」改写成「多线程的消费者」，
+    并新增 7.1 把层二那张表搬过来）
   - 做法：README 里写清 API、`waitForAll` 的限制、优先级只有三档、以及 D10 那四件不做的事。
   - 验收：一个没参与这次改动的人能只读文档就写出「解码 + 上传」那个两节点图。
 
-- [ ] **6.5 `examples/test_app` 跟上新 API**
+- [~] **6.5 `examples/test_app` 跟上新 API** ← 半完成：`render_system.cpp` 已换新 API 且编过；`test_app` 目标整体编不过（`test_app_layer.cpp` 三个 NVRHI 迁移遗留错误，开工前就有，见交接区）。不修。
   - 文件：`examples/test_app/test_app_layer.cpp:638-657`、`examples/test_app/render_system.cpp:40-50`
   - 做法：`launchPinned` / `waitForPinnedTask` 换成 `submitPinned` + `wait`；
     `verifyTaskSystem()` 里那个「4096 次乘 2」顺手改成有意义的活量（现状第 11 条）。
@@ -609,7 +752,7 @@ added」。所以它是**关停 / 帧屏障**用的，不是「等我关心的�
     默认 OFF，ArtiEngine 的构建不会碰到它（见「风险与注意」）。
   - 验收：`cmake -DARTICHOCO_BUILD_EXAMPLES=ON` 配置 + 编译通过。
 
-- [ ] **6.6 三层 submodule 推指针**
+- [x] **6.6 三层 submodule 推指针**（ArtiChoco `ba93e74` → ArtiRenderer `6fa9615`；本 commit 推 ArtiRenderer 指针。还没 push origin）
   - 做法：ArtiChoco 提交 → ArtiRenderer 推 ArtiChoco 指针（`chore(deps)`）→
     ArtiEngine 推 ArtiRenderer 指针（`chore(deps)`）。
   - 验收：从干净克隆 `git submodule update --init --recursive` + `cmake --preset debug` +

@@ -258,9 +258,9 @@ cmake --build --preset debug
 | 阴影的剩余部分 | 方向光的级联阴影已经有了（4 级、拟合视锥、texel snapping、3×3 PCF、slope-scaled bias、shadow distance + 淡出）。还没有的：点光 cubemap 阴影、聚光阴影、cascade 之间的过渡混合（Godot 的 `blend_splits` 默认也是关的，所以级间能看出接缝）、软阴影（PCSS / VSM / 硬件比较采样器） |
 | 阴影的视锥剔除 | 四级 cascade 意味着几何一帧画五遍（G-Buffer + 4 级），而没有剔除时**每级都把整个场景画一遍**，包括那一级正交范围外的物体。剔除要按每级的光锥做，不是按相机视锥 |
 | 源内容变更检测 | `.meta` 的 `ContentHash` / `Size` / `Importer.Version` **只写不读**。目前只有 artifact 缺失才触发重导，改了源文件内容必须手动重导 |
-| 资产管线多线程 | reconcile 全程同步单线程。`scan()` 是纯读、无共享写，将来换 `parallelFor` 语义不变 |
+| 多线程的消费者 | **任务系统本身已经有了**（`arti::core::TaskSystem`，enkiTS 封装：fork-join、带句柄的异步任务、钉线程任务、`TaskGraph` 依赖图，文档见 `core/task/README.md`），但**一个真实消费者都还没接**。每个接入点的位置和它该调的 API 列在下面那张表里 |
 | 脚本 / 音频 | 完全没有。`Update` / `LateUpdate` 两个 stage 空着在跑，是它们现成的挂载点（`FixedUpdate` 现在被物理占了） |
-| 物理的其余部分 | 刚体已经有了（球 / 盒 / 胶囊、静态 / 运动学 / 动态、休眠、堆叠）。还没有的：射线查询、触发器（sensor）、关节、三角网格 / 高度场碰撞体、复合体（一个 body 多个 collider）、角色控制器、多线程（桥到 enkiTS）。Box3D 这些都有，随时能加 —— 但现在没有脚本，查询结果没人消费 |
+| 物理的其余部分 | 刚体已经有了（球 / 盒 / 胶囊、静态 / 运动学 / 动态、休眠、堆叠）。还没有的：射线查询、触发器（sensor）、关节、三角网格 / 高度场碰撞体、复合体（一个 body 多个 collider）、角色控制器、多线程（桥到任务系统，见 7.1）。Box3D 这些都有，随时能加 —— 但现在没有脚本，查询结果没人消费 |
 | 带父级或有缩放的实体不参与模拟 | 物理在世界空间算而 `TransformComponent` 是局部的，带父级要拿父级的世界逆矩阵反算；碰撞体尺寸显式写在组件里、不跟 scale 走。两种情况都记一条 warn 并跳过，所以「一块大地面」要拆成缩放过的视觉体 + 不缩放的碰撞体两个实体 |
 | 渲染插值 | 物理按固定步长跑，画面按帧率画，所以快速运动会有细微抖动。接缝是现成的：`FixedTimestepAccumulator::alpha()`（当前余额占一个固定步的比例）还没人用 |
 | 前向管线 | 已整条移除，只有延迟一条路径。不留双路径是刻意的 |
@@ -273,6 +273,21 @@ cmake --build --preset debug
 | 发布只能用 Release | Debug 产物链的调试 CRT（`ucrtbased.dll` 等）不可再分发，而 staging 拷的是 redist 里的 release CRT。目前没有机制防止用 Debug 构建去 pack |
 | 导入设置 / Extract 的编辑器 UI | `AssetPipeline` 的 `sourceSettings` / `setAuthoredSetting` / `extractMaterial` 都在，但只有 CLI 在调。Content Browser 的预览栏目前只显示状态，不能改设置 |
 | 打包的编辑器入口 | 没有「Build」菜单项，只有 `asset_tools pack` |
+
+### 7.1 任务系统还没接的那些消费者
+
+任务系统这一层是**刻意单独做完、不带消费者**的：先把线程基座和 API 定下来，再一个一个接，
+每次接一个都是独立的、可单独验收的改动。下面每一行都能指出现在的位置和它会调的 API ——
+写不出 API 的行会是设计漏洞，所以这张表也是那一层的自检。
+
+| 未来消费者 | 现在在哪 | 会调什么 |
+| --- | --- | --- |
+| 资产 reconcile 的 scan | `AssetPipeline::planReconcile()` / `scan()` | `parallelFor(count, fn, {min_range})`。`scan()` 是纯读、无共享写，换过去语义不变 |
+| 资产导入的拓扑序 | `AssetPipeline::reconcile()` | `TaskGraph`：一个源文件一个节点，依赖边就是拓扑序 |
+| 纹理 / 网格解码 + 上传 | `GPUAssetCache` | `TaskGraph`：解码节点在 worker 上，上传节点 `addPinnedAfter` 钉在渲染线程。Rendering.md 第 1 节已经把这个界限划好了 |
+| 视锥剔除 / 抽取 | `RenderSceneExtractor::extract()` | `parallelForRanges` + `threadIndex()` 做每线程 bucket（`DrawItem::world_bounds` 每帧已经算好） |
+| 物理多线程 | `PhysicsSystem` → Box3D 的 `b3EnqueueTaskCallback` | `submitParallelFor` 拿句柄 + `wait(handle)` —— Box3D 的任务回调要的正是这个形状 |
+| 渲染线程 | 三个 exe 的 layer | `TaskSystemConfig::external_thread_count` + `registerExternalThread()` + 长驻 `submitPinned`（`examples/test_app/render_system.cpp` 已经演示过形状） |
 
 ## 8. 分册
 
@@ -291,3 +306,5 @@ cmake --build --preset debug
 - `ArtiRenderer/ArtiChoco/artichoco/scene/README.md` —— ECS 的完整 API 与不变式
 - `ArtiRenderer/ArtiChoco/artichoco/renderer/README.md` —— Vulkan / NVRHI 边界、Slang 反射、
   坐标约定、帧与线程模型
+- `ArtiRenderer/ArtiChoco/artichoco/core/task/README.md` —— 任务系统（enkiTS 封装）：
+  线程编号、`parallelFor` 的 grain size、句柄语义、`TaskGraph`、以及明确不做的四件事
