@@ -23,6 +23,7 @@
 #include "imgui/imgui_host.h"
 #include "runtime/scene_renderer.h"
 #include "scene/components.h"
+#include "scene/prefab_instantiation.h"
 
 #include "artichoco/core/application.h"
 #include "artichoco/core/io/paths.h"
@@ -36,12 +37,8 @@
 #include <cstring>
 #include <filesystem>
 #include <system_error>
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtc/quaternion.hpp>
-#include <glm/gtx/matrix_decompose.hpp>
 #include <imgui.h>
 #include <utility>
-#include <vector>
 
 namespace arti::editor {
 namespace {
@@ -635,52 +632,15 @@ void EditorLayer::spawnAssetEntity(core::UUID asset) {
             return;
         }
 
-        const auto& nodes = prefab->nodes();
-        std::vector<scene::Entity> created;
-        created.reserve(nodes.size());
-        for (const auto& node: nodes) {
-            auto entity = scene.createEntity(node.name.empty() ? "Prefab Node" : node.name);
-            auto& transform = entity.getComponent<scene::TransformComponent>();
-            glm::vec3 translation{ 0.0f };
-            glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f };
-            glm::vec3 scale{ 1.0f };
-            glm::vec3 skew{ 0.0f };
-            glm::vec4 perspective{ 1.0f };
-            if (glm::decompose(node.local_transform, scale, rotation, translation, skew,
-                        perspective)) {
-                transform.translation = translation;
-                transform.rotation = rotation;
-                transform.scale = scale;
-            }
-            if (node.mesh.isValid()) {
-                auto& mesh_renderer = entity.addComponent<engine::MeshRendererComponent>();
-                mesh_renderer.mesh =
-                        arti::asset::AssetHandle<engine::asset::MeshAsset>{ node.mesh };
-                for (const auto material: node.materials) {
-                    mesh_renderer.materials.push_back(
-                            arti::asset::AssetHandle<engine::asset::MaterialAsset>{ material });
-                }
-                if (mesh_renderer.materials.empty()) {
-                    mesh_renderer.materials.push_back(
-                            arti::asset::AssetHandle<engine::asset::MaterialAsset>{
-                                    engine::asset::kBuiltinDefaultMaterial });
-                }
-            }
-            created.push_back(entity);
-        }
-        for (size_t index = 0; index < created.size(); ++index) {
-            const uint32_t parent = nodes[index].parent;
-            if (parent != engine::asset::kNoParentNode && parent < created.size()) {
-                scene.setParent(created[index], created[parent]);
-            }
-        }
-        if (!created.empty()) {
-            m_context->setSelectedEntity(created.front().getComponent<scene::IDComponent>().id);
+        // 真正的生成在 Engine 层 —— 脚本 spawn_prefab 和播放器都走同一份，不能只活在编辑器里。
+        const auto root = engine::instantiatePrefab(scene, *prefab);
+        if (root.isValid()) {
+            m_context->setSelectedEntity(root.getComponent<scene::IDComponent>().id);
         }
         // 和上面 mesh 那条同理：拖放不产生 item 下降沿，显式报到。
         m_context->history().requestCommit();
         log.info("Spawned prefab '{}' ({} node(s))", metadata->source_path.string(),
-                created.size());
+                prefab->nodes().size());
         return;
     }
 

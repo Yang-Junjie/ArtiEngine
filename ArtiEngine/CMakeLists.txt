@@ -19,6 +19,7 @@ add_library(artiengine STATIC
     engine_log.cpp
     scene/component_registration.cpp
     scene/component_serialization.cpp
+    scene/prefab_instantiation.cpp
     scene/render_scene_extractor.cpp
 )
 add_library(ArtiEngine::Engine ALIAS artiengine)
@@ -96,6 +97,15 @@ if(BUILD_TESTING)
     set_target_properties(scene_snapshot_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
     add_test(NAME scene_snapshot_smoke COMMAND scene_snapshot_smoke)
     artichoco_stage_msvc_runtime(scene_snapshot_smoke)
+
+    # Prefab 实例化。链 Engine 不链 Runtime：它测的是 Scene + PrefabAsset，不该被物理 /
+    # 脚本那一层拖着。
+    add_executable(prefab_instantiate_smoke runtime/tests/prefab_instantiate_smoke.cpp)
+    target_compile_features(prefab_instantiate_smoke PRIVATE cxx_std_20)
+    target_link_libraries(prefab_instantiate_smoke PRIVATE ArtiEngine::Engine)
+    set_target_properties(prefab_instantiate_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
+    add_test(NAME prefab_instantiate_smoke COMMAND prefab_instantiate_smoke)
+    artichoco_stage_msvc_runtime(prefab_instantiate_smoke)
 endif()
 
 # ImGui 宿主单独一个 target：它要链 SDL 和 imgui 的 SDL3 后端，不该让核心库的下游都背上。
