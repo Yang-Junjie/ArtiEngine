@@ -126,6 +126,8 @@ bool PlayerLayer::openProject() {
     }
 
     m_gpu_assets = std::make_unique<engine::asset::GPUAssetCache>(m_assets->manager(), *m_renderer);
+    // 脚本按 handle load 资产。**必须在 loadScene 之前** —— 场景一读进来 tick 就可能开始跑。
+    m_world->setAssets(&m_assets->manager());
     return true;
 }
 

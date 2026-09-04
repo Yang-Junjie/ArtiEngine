@@ -67,6 +67,19 @@ std::unordered_map<core::UUID, EnvironmentEditorState>& environmentEditorStates(
     return states;
 }
 
+// Script 的 UUID 输入框。和 Environment 同一套缓存规则，理由见那边的注释 —— 漏了 applied /
+// initialized，撤销会静默失效。
+struct ScriptEditorState {
+    std::string text;
+    core::UUID applied{};
+    bool initialized{ false };
+};
+
+std::unordered_map<core::UUID, ScriptEditorState>& scriptEditorStates() {
+    static std::unordered_map<core::UUID, ScriptEditorState> states;
+    return states;
+}
+
 std::string uuidToText(core::UUID uuid) { return uuid.toString(); }
 
 // 枚举下拉行。names 的下标必须和枚举值对齐（0, 1, 2 …），序列化那边也是按同一个顺序把枚举
@@ -209,6 +222,8 @@ void drawAddComponentUI(scene::Entity& entity) {
         ImGui::SeparatorText("Physics");
         drawAddMenuItem<engine::RigidBodyComponent>("Rigid Body", entity);
         drawAddMenuItem<engine::ColliderComponent>("Collider", entity);
+        ImGui::SeparatorText("Script");
+        drawAddMenuItem<engine::ScriptComponent>("Script", entity);
         ImGui::EndPopup();
     }
 }
@@ -256,6 +271,7 @@ void InspectorPanel::draw() {
     drawEnvironmentComponent(entity);
     drawRigidBodyComponent(entity);
     drawColliderComponent(entity);
+    drawScriptComponent(entity);
 
     ImGui::End();
 }
@@ -578,6 +594,33 @@ void InspectorPanel::drawColliderComponent(scene::Entity& entity) {
     drawFloatRow("Friction", &collider->friction, 0.01f, 0.0f, 1.0f, "%.2f");
     drawFloatRow("Restitution", &collider->restitution, 0.01f, 0.0f, 1.0f, "%.2f",
             "0 does not bounce");
+    endPropertyGrid();
+}
+
+void InspectorPanel::drawScriptComponent(scene::Entity& entity) {
+    auto* script = tryGet<engine::ScriptComponent>(entity);
+    if (script == nullptr) {
+        return;
+    }
+
+    if (!drawComponentHeader<engine::ScriptComponent>(entity, "Script", /*default_open=*/true,
+                "Runs in Simulate / Play. Edit mode does not tick, so the script stays idle.")) {
+        return;
+    }
+
+    auto& state = scriptEditorStates()[entity.getComponent<scene::IDComponent>().id];
+    if (!state.initialized || script->script.id() != state.applied) {
+        state.text = uuidToText(script->script.id());
+        state.applied = script->script.id();
+        state.initialized = true;
+    }
+
+    beginPropertyGrid();
+    propertyRow("Script");
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    if (drawUuidInput("##script_uuid", state.text, state.applied)) {
+        script->script = arti::asset::AssetHandle<engine::asset::ScriptAsset>{ state.applied };
+    }
     endPropertyGrid();
 }
 

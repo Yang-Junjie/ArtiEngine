@@ -12,6 +12,7 @@ namespace arti::engine {
 namespace asset {
 class MaterialAsset;
 class MeshAsset;
+class ScriptAsset;
 class TextureAsset;
 }
 
@@ -133,6 +134,13 @@ struct ColliderComponent {
     float friction{ 0.3f };
     // 弹性系数。默认 0：不弹，掉下来就停住。
     float restitution{ 0.0f };
+};
+
+// 按实体挂一份 Lua 脚本。字段只有资产 handle —— 运行时的 sol::environment 活在
+// ScriptSystem 的 pimpl 里，不进组件、不进快照、不进磁盘。漏把指针放进来，
+// Play 快照就会浅拷一份悬空指针，Stop 时炸。
+struct ScriptComponent {
+    arti::asset::AssetHandle<asset::ScriptAsset> script;
 };
 
 }

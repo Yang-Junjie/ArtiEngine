@@ -33,6 +33,16 @@ if(BUILD_TESTING)
     # ctest 不应该依赖 SDK 在 PATH 上：它链了 slang，缺 DLL 进程起不来。
     artichoco_stage_vulkan_sdk_runtime(asset_pipeline_smoke)
     artichoco_stage_msvc_runtime(asset_pipeline_smoke)
+
+    # 脚本端到端。放在这里而不是 ArtiEngine 下：它需要 AssetPipeline（importer 只在那边注册）
+    # 和 World 两个，而 ArtiEngine 的测试目标链不到 ArtiTools::Asset。
+    add_executable(script_runtime_smoke tests/script_runtime_smoke.cpp)
+    target_compile_features(script_runtime_smoke PRIVATE cxx_std_20)
+    target_link_libraries(script_runtime_smoke PRIVATE ArtiTools::Asset ArtiChoco::Core)
+    set_target_properties(script_runtime_smoke PROPERTIES FOLDER "Tests/Tools")
+    add_test(NAME script_runtime_smoke COMMAND script_runtime_smoke)
+    artichoco_stage_vulkan_sdk_runtime(script_runtime_smoke)
+    artichoco_stage_msvc_runtime(script_runtime_smoke)
 endif()
 # 运行时依赖和内建 shader 拷到 exe 旁边。
 #

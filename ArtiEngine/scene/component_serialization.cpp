@@ -2,6 +2,7 @@
 
 #include "asset/material_asset.h"
 #include "asset/mesh_asset.h"
+#include "asset/script_asset.h"
 #include "asset/texture_asset.h"
 
 #include <cstddef>
@@ -342,6 +343,22 @@ void registerSceneSerialization(scene::SceneSerializationRegistry& registry) {
             std::make_unique<RigidBodySerialization>());
     registry.registerComponent<ColliderComponent>(std::string{ ColliderSerialization::typeName() },
             std::make_unique<ColliderSerialization>());
+    registry.registerComponent<ScriptComponent>(std::string{ ScriptSerialization::typeName() },
+            std::make_unique<ScriptSerialization>());
+}
+
+YAML::Node ScriptSerialization::serialize(const ScriptComponent& component) const {
+    YAML::Node node;
+    node["Script"] = writeUUID(component.script.id());
+    return node;
+}
+
+ScriptComponent ScriptSerialization::deserialize(const YAML::Node& node) const {
+    requireMap(node, "Script");
+
+    ScriptComponent component;
+    component.script = arti::asset::AssetHandle<asset::ScriptAsset>{ readUUID(node["Script"]) };
+    return component;
 }
 
 }

@@ -71,6 +71,14 @@ public:
     ColliderComponent deserialize(const YAML::Node& node) const override;
 };
 
+class ScriptSerialization final : public scene::ComponentSerialization<ScriptComponent> {
+public:
+    static constexpr std::string_view typeName() noexcept { return "artiengine.script"; }
+
+    YAML::Node serialize(const ScriptComponent& component) const override;
+    ScriptComponent deserialize(const YAML::Node& node) const override;
+};
+
 void registerSceneSerialization(scene::SceneSerializationRegistry& registry);
 
 }

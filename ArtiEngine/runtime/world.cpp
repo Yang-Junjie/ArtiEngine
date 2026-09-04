@@ -2,6 +2,7 @@
 
 #include "engine_log.h"
 #include "runtime/physics_system.h"
+#include "runtime/script_system.h"
 #include "scene/component_registration.h"
 
 #include "artichoco/scene/scene.h"
@@ -23,6 +24,14 @@ World::World()
     // 物理是 FixedUpdate 的第一个消费者。注册**只有这一处**，所以编辑器的 Play /
     // Simulate 和独立 player 跑的是同一份 —— 不会出现「编辑器里能掉、exe 里不动」（D2）。
     m_scene->addSystem<PhysicsSystem>(scene::SystemStage::FixedUpdate);
+    // 脚本是 Update 的第一个消费者，同样**只注册这一处**。Edit 模式不调 World::tick()，
+    // 所以「编辑期不跑脚本」是免费的，不需要再加开关。
+    m_scene->addSystem<ScriptSystem>(scene::SystemStage::Update);
+}
+
+void World::setAssets(arti::asset::AssetManager* assets) noexcept {
+    m_assets = assets;
+    m_scene->getSystem<ScriptSystem>().setAssets(assets);
 }
 
 World::~World() = default;

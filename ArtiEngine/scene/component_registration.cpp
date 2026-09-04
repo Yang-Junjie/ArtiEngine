@@ -15,6 +15,7 @@ void registerSceneComponents(arti::scene::SceneSerializationRegistry* registry) 
     scene::Scene::registerComponentCopy<EnvironmentComponent>();
     scene::Scene::registerComponentCopy<RigidBodyComponent>();
     scene::Scene::registerComponentCopy<ColliderComponent>();
+    scene::Scene::registerComponentCopy<ScriptComponent>();
 
     if (registry != nullptr) {
         registerSceneSerialization(*registry);

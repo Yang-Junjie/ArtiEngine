@@ -25,6 +25,7 @@ private:
     void drawEnvironmentComponent(scene::Entity& entity);
     void drawRigidBodyComponent(scene::Entity& entity);
     void drawColliderComponent(scene::Entity& entity);
+    void drawScriptComponent(scene::Entity& entity);
 
     EditorContext& m_context;
 };

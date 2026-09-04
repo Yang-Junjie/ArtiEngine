@@ -7,6 +7,10 @@
 #include <string>
 #include <string_view>
 
+namespace arti::asset {
+class AssetManager;
+} // namespace arti::asset
+
 namespace arti::scene {
 class Scene;
 class SceneSerializationRegistry;
@@ -70,6 +74,12 @@ public:
 
     std::uint64_t frameIndex() const noexcept { return m_frame_index; }
 
+    // 脚本 load 资产用。编辑器在项目打开 / 关闭时设 / 清；播放器在 AssetRuntime 打开之后设。
+    // **不进构造函数**：编辑器里 World 比项目先存在。指针为空时 ScriptSystem 跳过并 warn 一次。
+    void setAssets(arti::asset::AssetManager* assets) noexcept;
+    arti::asset::AssetManager* assets() noexcept { return m_assets; }
+    const arti::asset::AssetManager* assets() const noexcept { return m_assets; }
+
 private:
     std::unique_ptr<scene::Scene> m_scene;
     // 序列化表不是进程级的（是个对象），所以每个 World 自己持一份。
@@ -78,6 +88,7 @@ private:
 
     core::FixedTimestepAccumulator m_fixed_accumulator;
     std::uint64_t m_frame_index{ 0 };
+    arti::asset::AssetManager* m_assets{ nullptr };
 };
 
 } // namespace arti::engine

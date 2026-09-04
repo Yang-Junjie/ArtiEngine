@@ -64,6 +64,12 @@ void EditorContext::exitToEdit() {
     core::Application::get().getLogChannel().info("Returned to Edit mode (scene restored)");
 }
 
-void EditorContext::updateSimulation(float delta_time) { m_world->tick(delta_time); }
+void EditorContext::updateSimulation(float delta_time) {
+    // 脚本要按 handle 去 load 资产。每帧同步一次而不是在「项目打开」那个事件上挂钩子：
+    // 换项目、关项目、读失败都会改这个指针，而 tick 之前设一次是无条件正确的，
+    // 代价只有一次指针写。
+    m_world->setAssets(isProjectOpen() ? &m_project->assets() : nullptr);
+    m_world->tick(delta_time);
+}
 
 } // namespace arti::editor
