@@ -50,6 +50,43 @@ set_target_properties(stb PROPERTIES FOLDER "ThirdParty")
 # submodule 消费时只会建 box3d 这一个 target，不用我们关任何开关。
 add_subdirectory(box3d)
 
+# Lua + sol2：脚本。Lua 是 C，sol2 是纯头的 C++ 绑定层。
+#
+# 两个都 **pin 在 tag** 上（和 box3d 跟 main 相反）：它们是稳定发布物，跟 main 只会平白吃到
+# breaking change。升级是显式动作 —— `git -C third_party/lua checkout vX.Y.Z` 再单独提交指针。
+#
+# 官方 lua 仓库没有 CMakeLists，而且源码在**仓库根目录**（不是 src/），所以这里自己攒一个静态库。
+# 三个文件必须排除：
+#   lua.c     独立解释器的 main()
+#   onelua.c  把所有 .c #include 到一起的单编译单元版本 —— 一起编就是满屏重复定义
+#   ltests.c  内部测试钩子，只在 LUA_USER_H=ltests.h 时有意义
+enable_language(C)
+
+file(GLOB _arti_lua_sources "${CMAKE_CURRENT_SOURCE_DIR}/lua/*.c")
+list(FILTER _arti_lua_sources EXCLUDE REGEX "/(lua|onelua|ltests)\\.c$")
+list(LENGTH _arti_lua_sources _arti_lua_source_count)
+# 明确不是 GLOB 出空列表就默默编个空库：submodule 没拉全时，症状该是配置期报错。
+if(_arti_lua_source_count LESS 20)
+    message(FATAL_ERROR
+        "third_party/lua looks incomplete (${_arti_lua_source_count} sources found).\n"
+        "Run: git submodule update --init --recursive")
+endif()
+
+add_library(lua STATIC ${_arti_lua_sources})
+add_library(Lua::Lua ALIAS lua)
+target_include_directories(lua SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/lua")
+set_target_properties(lua PROPERTIES FOLDER "ThirdParty" C_STANDARD 99)
+unset(_arti_lua_sources)
+unset(_arti_lua_source_count)
+
+# sol2：纯头。SOL_ALL_SAFETIES_ON 打开 —— 类型检查和 protected 调用是默认路径。脚本是用户
+# 写的数据，一个手误不该变成未定义行为，而这一层的开销在「每帧几十个回调」的量级上无所谓。
+add_library(sol2 INTERFACE)
+add_library(Sol2::Sol2 ALIAS sol2)
+target_include_directories(sol2 SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/sol2/include")
+target_compile_definitions(sol2 INTERFACE SOL_ALL_SAFETIES_ON=1)
+target_link_libraries(sol2 INTERFACE lua)
+
 # **必须把 CRT 掰回来。** box3d 的 CMakeLists 顶上无条件写了
 #     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # 也就是静态 CRT（/MT），注释说是为了方便查内存泄漏。那个 set 在它自己的目录作用域里生效，

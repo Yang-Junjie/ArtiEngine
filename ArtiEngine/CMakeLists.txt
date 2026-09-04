@@ -106,6 +106,15 @@ if(BUILD_TESTING)
     set_target_properties(prefab_instantiate_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
     add_test(NAME prefab_instantiate_smoke COMMAND prefab_instantiate_smoke)
     artichoco_stage_msvc_runtime(prefab_instantiate_smoke)
+
+    # Lua VM 的冒烟。和 physics_smoke 同一个套路：**不链引擎**，只链 sol2（它 PUBLIC 带上 lua）。
+    # 所以脚本层出问题时，这一层是不是通的不用再怀疑。它也是 lua submodule 换版本的对冲。
+    add_executable(lua_vm_smoke runtime/tests/lua_vm_smoke.cpp)
+    target_compile_features(lua_vm_smoke PRIVATE cxx_std_20)
+    target_link_libraries(lua_vm_smoke PRIVATE Sol2::Sol2)
+    set_target_properties(lua_vm_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
+    add_test(NAME lua_vm_smoke COMMAND lua_vm_smoke)
+    artichoco_stage_msvc_runtime(lua_vm_smoke)
 endif()
 
 # ImGui 宿主单独一个 target：它要链 SDL 和 imgui 的 SDL3 后端，不该让核心库的下游都背上。

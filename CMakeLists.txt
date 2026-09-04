@@ -26,6 +26,8 @@ foreach(_arti_required_submodule
     "${ARTIENGINE_ARTIRENDERER_DIR}/third_party/imgui/imgui.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ImGuizmo/src/ImGuizmo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/box3d/CMakeLists.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lua/lua.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sol2/include/sol/sol.hpp"
 )
     if(NOT EXISTS "${_arti_required_submodule}")
         message(FATAL_ERROR
