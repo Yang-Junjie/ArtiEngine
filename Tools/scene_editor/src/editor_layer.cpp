@@ -1,5 +1,6 @@
 #include "editor_layer.h"
 
+#include "edit_history.h"
 #include "editor_camera.h"
 #include "editor_context.h"
 #include "editor_gizmo.h"
@@ -164,6 +165,11 @@ void EditorLayer::onImGuiRender() {
 
     m_imgui->dockSpaceOverViewport();
 
+    // 记下这一帧**开始时**的选中：帧末真的压历史项时，压进去的是「旧场景 + 这个选中」。
+    // 取帧初而不是帧末，是为了让「删掉 E」撤销回来之后 E 是选中的 —— 删除在
+    // HierarchyPanel::draw() 开头落地，落地时会把选中清掉。
+    m_context->history().beginFrame(m_context->selectedEntity());
+
     const bool gizmo_enabled = !m_context->isGameView();
     m_gizmo->handleShortcuts(gizmo_enabled);
     // 在面板之前分派：Ctrl+D 置下的请求在 HierarchyPanel::draw() 开头就落地，同一帧生效。
@@ -194,6 +200,29 @@ void EditorLayer::onImGuiRender() {
     if (const auto click = m_viewport_panel->consumeClick()) {
         m_renderer->requestPick(rendering::PickRequest{ click->first, click->second });
     }
+
+    // 帧末统一查一次要不要压一条历史项 —— 放在这里是因为此时这一帧所有面板和 gizmo 都画完了，
+    // 场景已经是这一帧的最终样子。
+    //
+    // 「一次交互刚结束」用的是**下降沿**：一次拖拽从按下到松开，ImGui 的 ActiveId 一直在，
+    // 只有松开那一帧掉沿，所以整条拖拽合成**一条**历史项而不是每帧一条。至于「这一帧到底改了
+    // 什么没有」不在这儿判 —— EditHistory 比较序列化文本，比任何逐控件的判断都准（见那个头）。
+    //
+    // `gizmo_enabled &&` 那一下是必需的：Play 模式下 EditorGizmo::draw() 根本不被调用
+    // （上面那个 overlay 回调提前 return 了），m_using 会停在上一次的值。
+    const bool gizmo_using = gizmo_enabled && m_gizmo->isUsing();
+    const bool item_active = ImGui::IsAnyItemActive();
+    const bool interaction_ended =
+            (!item_active && m_was_item_active) || (!gizmo_using && m_was_gizmo_using);
+    // **模拟中不记历史。** 物理每个固定步都在往 transform 里写，记下去就是一栈「盒子又掉了两
+    // 厘米」；而模拟期间的改动本来就落在快照上、Stop 就原样回来，所以「撤销一次模拟」已经是
+    // 免费的了，不需要历史栈再管一遍。
+    if (!m_context->isSimulating()) {
+        m_context->history().commitIfChanged(m_context->world(), m_context->selectedEntity(),
+                interaction_ended);
+    }
+    m_was_item_active = item_active;
+    m_was_gizmo_using = gizmo_using;
 
     m_imgui->endFrame();
 }
@@ -319,9 +348,11 @@ void EditorLayer::drawMenuBar() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit")) {
-            if (ImGui::MenuItem("Undo", "Ctrl+Z", false, false)) {
+            if (ImGui::MenuItem("Undo", "Ctrl+Z", false, canUndo())) {
+                undoEdit();
             }
-            if (ImGui::MenuItem("Redo", "Ctrl+Y", false, false)) {
+            if (ImGui::MenuItem("Redo", "Ctrl+Y", false, canRedo())) {
+                redoEdit();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, canDuplicateSelection())) {
@@ -363,6 +394,52 @@ void EditorLayer::deleteSelection() {
         return;
     }
     m_hierarchy_panel->requestDelete(*m_context->selectedEntity());
+}
+
+// 撤销和重做共用的前提，除了「栈里有东西」的那两条。
+bool EditorLayer::canEditHistory() const {
+    if (m_context == nullptr || !m_context->isProjectOpen()) {
+        return false;
+    }
+    // **模拟中不许撤销**，和 canSaveScene() 同一条理由：Simulate / Play 期间物理一直在往
+    // transform 里写，撤销一下会和它直接对打。而模拟期间的改动本来就在 Stop 时整个丢掉。
+    if (m_context->isSimulating()) {
+        return false;
+    }
+    // **交互进行中不许撤销**：一边按着拖动框（或 gizmo）一边按 Ctrl+Z，ImGui 的 ActiveId 还
+    // 指着那个控件，而它背后的组件已经被整个换掉了 —— 那之后会发生什么不好推理，挡住这一下
+    // 便宜得多。gizmo 这一项读的是上一帧的值（它要到 Viewport 那步才更新），够用：上一帧在拖
+    // 的话这一帧几乎必然还在拖。
+    return !ImGui::IsAnyItemActive() && (m_gizmo == nullptr || !m_gizmo->isUsing());
+}
+
+bool EditorLayer::canUndo() const {
+    return canEditHistory() && m_context->history().canUndo();
+}
+
+void EditorLayer::undoEdit() {
+    if (!canUndo()) {
+        return;
+    }
+    // 选中跟着历史项一起走：进去是「现在选的是谁」（重做回来时用），出来是那条历史项记下的。
+    auto selection = m_context->selectedEntity();
+    if (m_context->history().undo(m_context->world(), selection)) {
+        m_context->setSelectedEntity(selection);
+    }
+}
+
+bool EditorLayer::canRedo() const {
+    return canEditHistory() && m_context->history().canRedo();
+}
+
+void EditorLayer::redoEdit() {
+    if (!canRedo()) {
+        return;
+    }
+    auto selection = m_context->selectedEntity();
+    if (m_context->history().redo(m_context->world(), selection)) {
+        m_context->setSelectedEntity(selection);
+    }
 }
 
 bool EditorLayer::canChangeScene() const {
@@ -408,10 +485,16 @@ void EditorLayer::handleShortcuts() {
     if (canDuplicateSelection() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D, route)) {
         duplicateSelection();
     }
+    if (canUndo() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, route)) {
+        undoEdit();
+    }
+    if (canRedo() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, route)) {
+        redoEdit();
+    }
 
-    // Delete 是**光秃秃的一个键**，没有修饰键给它兜底，而它干的事又是不可撤销的 ——
-    // 所以除了 Shortcut() 的焦点路由，再显式挡一道 WantTextInput：在 Inspector 里改名字、
-    // 想删掉一个打错的字符，绝不能变成删掉这个实体。
+    // Delete 是**光秃秃的一个键**，没有修饰键给它兜底，所以除了 Shortcut() 的焦点路由，
+    // 再显式挡一道 WantTextInput：在 Inspector 里改名字、想删掉一个打错的字符，绝不能变成
+    // 删掉这个实体。**现在有撤销了，但这道防线别拆** —— 误删之后能救回来，仍然不如别误删。
     //
     // 语义上它固定是「删掉选中的实体」，不随焦点面板变 —— 整个编辑器只有一份选中状态
     //（`EditorContext::m_selected_entity`），Content Browser 那边根本没有删除操作。
@@ -419,9 +502,6 @@ void EditorLayer::handleShortcuts() {
             ImGui::Shortcut(ImGuiKey_Delete, route)) {
         deleteSelection();
     }
-
-    // Ctrl+Z / Ctrl+Y **刻意不接**：没有 undo 栈，接上去只能是个什么都不做的键。
-    // 菜单里那两项也仍然是灰的 —— 灰着的菜单项说的是实话，能按下去却没反应的快捷键不是。
 }
 
 void EditorLayer::drawToolbar() {
@@ -455,6 +535,15 @@ void EditorLayer::drawToolbar() {
     ImGui::TextUnformatted(mode == EditorContext::Mode::Play         ? "[Play]"
                     : mode == EditorContext::Mode::Simulate ? "[Simulate]"
                                                             : "[Edit]");
+
+    // 未保存标记。以前这个标记只在「拖资产进 Viewport」那一处置位，摆出来纯属误导；现在它由
+    // 撤销历史推导，是精确的（改一个数就亮、撤销回存盘时的状态就灭），所以值得让它可见 ——
+    // 一个看不见的标记没人会去维护。
+    if (m_document->isDirty()) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4{ 0.95f, 0.75f, 0.25f, 1.0f }, "*");
+        ImGui::SetItemTooltip("Unsaved changes");
+    }
 
     // gizmo 的这几个控件跟着 gizmo 走，也就是「是不是游戏视角」那条轴 —— Simulate 下 gizmo
     // 还在，所以它们也还在。
@@ -532,7 +621,9 @@ void EditorLayer::spawnAssetEntity(core::UUID asset) {
                 arti::asset::AssetHandle<engine::asset::MaterialAsset>{
                         engine::asset::kBuiltinDefaultMaterial });
         m_context->setSelectedEntity(entity.getComponent<scene::IDComponent>().id);
-        m_document->markDirty();
+        // 拖放的结束是 IsMouseReleased，不是 ImGui item 的下降沿，所以帧末那套信号覆盖不到 ——
+        // 显式报到一次。脏标记也跟着这条历史项走，不用再 markDirty()。
+        m_context->history().requestCommit();
         log.info("Spawned '{}' into the scene", metadata->source_path.string());
         return;
     }
@@ -586,7 +677,8 @@ void EditorLayer::spawnAssetEntity(core::UUID asset) {
         if (!created.empty()) {
             m_context->setSelectedEntity(created.front().getComponent<scene::IDComponent>().id);
         }
-        m_document->markDirty();
+        // 和上面 mesh 那条同理：拖放不产生 item 下降沿，显式报到。
+        m_context->history().requestCommit();
         log.info("Spawned prefab '{}' ({} node(s))", metadata->source_path.string(),
                 created.size());
         return;

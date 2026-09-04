@@ -224,8 +224,11 @@ cmake --build --preset debug
   而独立 clang 走 MSVC ABI 时 `MSVC` 是空的），所以发现逻辑自己写在 `ArtiMsvcRuntime.cmake`。
 - `ARTIENGINE_BUILD_TOOLS=OFF` 可以只建引擎和播放器。`Runtime/` 没有开关 —— 运行时是交付物，
   不是可选工具。
-- 测试：`ctest`。目前 ArtiEngine 侧只有 `asset_pipeline_smoke`，渲染侧的冒烟覆盖在
-  ArtiRenderer / ArtiChoco 自己的 example 和 test 里。
+- 测试：`ctest`，10 条。ArtiEngine 侧四条：`asset_pipeline_smoke`（资产流水线）、
+  `physics_smoke`（只链 box3d，不碰引擎）、`scene_snapshot_smoke`（场景 ↔ 文本的往返与规范形式）、
+  `edit_history_test`（编辑器的撤销栈逻辑）。另外六条来自 ArtiRenderer / ArtiChoco 自己的单元测试
+  （`ARTIRENDERER_BUILD_TESTS=ON` 白捡的那几个）。**渲染画面本身没有自动化覆盖** ——
+  阴影、剔除这类都靠人工比对截图。
 
 代码风格约定：4 空格、100 列、LF。仓库根有 `.clang-format`，但**既有文件并没有按它格式化
 过** —— 改老文件时手写成周围的风格，不要跑格式化工具，否则 diff 里全是与改动无关的噪声。
@@ -254,6 +257,7 @@ cmake --build --preset debug
 
 | 空缺 | 现状与接缝 |
 | --- | --- |
+| 撤销的粒度和覆盖面 | **撤销 / 重做已做**（`Ctrl+Z` / `Ctrl+Y`，整场景快照 + 文本比较，见 Applications.md）。边界有三条：粒度只到「一次交互 = 一整个场景」，不是单个字段；**只有序列化过的组件能撤销**，「注册了拷贝、没注册序列化」的组件撤不回来且不报错；只管场景，资产和项目设置不进历史 |
 | 视锥剔除 | **已做**（相机 AABB vs 视锥 + 阴影光空间 XY 重叠）。还没有的：遮挡剔除、BVH / 空间划分、每级 cascade 的 LOD、并行化（接缝已留，见 Rendering.md 第 9 节） |
 | 阴影的剩余部分 | 方向光的级联阴影已经有了（4 级、拟合视锥、texel snapping、3×3 PCF、slope-scaled bias、shadow distance + 淡出）。每级按光空间 XY 重叠剔投射体，不再四级全场景画一遍。还没有的：点光 cubemap 阴影、聚光阴影、cascade 之间的过渡混合（Godot 的 `blend_splits` 默认也是关的，所以级间能看出接缝）、软阴影（PCSS / VSM / 硬件比较采样器） |
 | 阴影的视锥剔除 | **已做**。判据是每级 cascade 的光空间 XY 重叠，**不是**相机视锥。Z 方向不另判：near/far 就是按 XY 重叠的投射体撑开的。详见 Rendering.md 第 9 节 |

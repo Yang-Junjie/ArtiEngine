@@ -12,6 +12,7 @@ class Scene;
 
 namespace arti::editor {
 
+class EditHistory;
 class EditorProject;
 
 class EditorContext {
@@ -43,6 +44,11 @@ public:
 
     EditorProject& project() noexcept { return *m_project; }
 
+    // 撤销 / 重做栈。放在这里而不是 EditorLayer 里，是因为面板也要报到（右键菜单建实体、
+    // 延迟落地的复制 / 删除），而面板手里本来就有 EditorContext —— 不用再拉一条 plumbing。
+    EditHistory& history() noexcept { return *m_history; }
+    const EditHistory& history() const noexcept { return *m_history; }
+
     bool isProjectOpen() const noexcept;
 
     const std::optional<core::UUID>& selectedEntity() const noexcept { return m_selected_entity; }
@@ -73,6 +79,7 @@ private:
 
     EditorProject* m_project{ nullptr };
     std::unique_ptr<engine::World> m_world;
+    std::unique_ptr<EditHistory> m_history;
     std::unique_ptr<State> m_state;
     std::optional<core::UUID> m_selected_entity;
     Mode m_mode{ Mode::Edit };

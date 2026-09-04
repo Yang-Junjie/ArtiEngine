@@ -89,11 +89,19 @@ EnTT 之上的 ECS，`Scene` 是门面和聚合根。每个实体自带五个必
 scene::Scene& scene();
 bool loadScene(path);        // 失败时场景是空的，不留半个读进来的场景假装成功
 bool saveScene(path) const;
+std::string captureScene() const;          // 场景 → 内存里的一段文本（内容和存盘的完全一样）
+bool restoreScene(std::string_view text);  // 反过来。**失败时场景一点不变**，也不动时钟
 void clear();                // 清实体 + 归零时钟
 void tick(float dt);
 void resetClock();           // 进 Play 模式时调 —— 那是一次新会话的开始
 uint64_t frameIndex();
 ```
+
+`captureScene` / `restoreScene` 和存盘走同一条序列化路径，只是换了个去处 —— 所以「快照」和
+「存盘」不会各自漂移。编辑器的撤销栈就是一叠 `captureScene()` 的结果（见
+[Applications.md](Applications.md#撤销--重做)）。两个和 `loadScene` 刻意不同的地方：
+`restoreScene` **失败时不清场景**（读文件失败意味着「你要的场景不存在」，留半个更糟；恢复一条历史
+项失败意味着历史栈坏了，这时候再清空用户正在编辑的场景纯属雪上加霜），而且**不动时钟**。
 
 `tick()` 的顺序：
 
@@ -215,3 +223,7 @@ RenderSceneExtractor::extract(scene, gpu_assets, renderer, target) → const Ren
 5. 要能在 Inspector 里编辑的话，`Tools/scene_editor/src/panels/inspector_panel.cpp`。
 
 克隆注册和序列化注册**刻意分开**：有些运行时组件可拷贝但不该持久化。
+
+**代价在撤销上**：编辑器的撤销栈存的是序列化文本，所以「注册了拷贝、没注册序列化」的组件
+**撤不回来，而且不会报错**（见 [Applications.md](Applications.md#撤销--重做) 末尾那条边界）。
+真要加这种组件时，先想清楚它撤不回来是否可以接受。

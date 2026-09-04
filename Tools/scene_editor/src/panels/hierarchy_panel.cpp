@@ -1,5 +1,6 @@
 #include "panels/hierarchy_panel.h"
 
+#include "edit_history.h"
 #include "editor_context.h"
 
 #include "artichoco/scene/components.h"
@@ -69,6 +70,9 @@ void HierarchyPanel::draw() {
             copy.getComponent<scene::TagComponent>().tag =
                     uniqueTag(scene, source.getComponent<scene::TagComponent>().tag);
             m_context.setSelectedEntity(copy.getUUID());
+            // 这一帧可能一个 ImGui item 都没动过（请求是上一帧下的，来源可能还是键盘），
+            // 所以帧末那套下降沿信号覆盖不到这里 —— 显式报到一次。
+            m_context.history().requestCommit();
         }
         m_pending_duplicate = std::nullopt;
     }
@@ -77,6 +81,7 @@ void HierarchyPanel::draw() {
         auto victim = scene.findEntity(*m_pending_delete);
         if (victim.isValid()) {
             scene.destroyEntity(victim);
+            m_context.history().requestCommit();
         }
         // 按「选中的还在不在」清，而不是比对「删掉的是不是选中的那个」：destroyEntity()
         // 连整棵子树一起删，所以删一个祖先也会带走选中的那个实体。
@@ -100,6 +105,9 @@ void HierarchyPanel::draw() {
             auto entity = scene.createEntity("Entity");
             const auto& id = entity.getComponent<scene::IDComponent>();
             m_context.setSelectedEntity(id.id);
+            // 菜单项本身是有下降沿的，但它在弹出层里 —— 多要一条请求比推理弹出层的 ID
+            // 生命周期便宜。多报一次是无害的：EditHistory 比较文本，没变就不会压历史项。
+            m_context.history().requestCommit();
         }
         ImGui::EndPopup();
     }
@@ -157,6 +165,7 @@ void HierarchyPanel::drawEntityNode(core::UUID entity) {
         if (ImGui::MenuItem("Create Child Entity")) {
             auto child = scene.createEntity("Entity");
             scene.setParent(child, entity_handle);
+            m_context.history().requestCommit();
         }
         if (ImGui::MenuItem("Duplicate Entity", "Ctrl+D")) {
             requestDuplicate(entity);

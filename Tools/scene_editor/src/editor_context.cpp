@@ -1,5 +1,6 @@
 #include "editor_context.h"
 
+#include "edit_history.h"
 #include "editor_project.h"
 
 #include "artichoco/core/application.h"
@@ -16,7 +17,12 @@ struct EditorContext::State {
 EditorContext::EditorContext(EditorProject& project)
         : m_project(&project),
           m_world(std::make_unique<engine::World>()),
-          m_state(std::make_unique<State>()) {}
+          m_history(std::make_unique<EditHistory>()),
+          m_state(std::make_unique<State>()) {
+    // 拿一个基线，这样「刚起编辑器就按 Ctrl+Z」也是明确的空操作。真正的基线由
+    // SceneDocument 在每次换场景之后重新给。
+    m_history->reset(*m_world, std::nullopt);
+}
 
 EditorContext::~EditorContext() = default;
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <filesystem>
 
 namespace arti::editor {
@@ -38,14 +39,26 @@ public:
     // 当前场景文件。空 = 还没存过（save() 会转成 saveAs()）。
     const std::filesystem::path& file() const noexcept { return m_file; }
 
-    // 有未保存的改动。现在只在明确的编辑动作后置位，不做逐字段脏检查 ——
-    // 那需要在 Inspector 和 gizmo 的每个写入点埋钩子，先做个够用的版本。
-    bool isDirty() const noexcept { return m_dirty; }
-    void markDirty() noexcept { m_dirty = true; }
+    // 有未保存的改动。**由撤销历史推导**：当前状态编号 ≠ 存盘时记下的那个编号。
+    //
+    // 所以它是精确的 —— 以前这个标记只在「拖资产进 Viewport」那一处置位，Inspector 改数、拖
+    // gizmo、建 / 删 / 复制实体全都不算脏。而且**撤销回存盘时的那个状态会自动变回干净**，
+    // 这是编号方案比「提交就置脏」强的地方。
+    bool isDirty() const noexcept;
+
+    // 强制置脏。场景**之外**的改动（将来的项目设置之类）可以用它；场景内的改动不需要报到 ——
+    // 历史栈已经在算了。0 是不可能出现的状态编号（编号从 1 开始）。
+    void markDirty() noexcept { m_saved_state_id = 0; }
 
 private:
-    // 换场景前的公共动作：退 Play、清实体、清选中、清文件名和脏标记。
+    // 换场景前的公共动作：退 Play、清实体、清选中、清文件名。
     void reset();
+
+    // 拿一份新的撤销基线，并把「存盘时是哪个状态」对齐到它（于是场景变干净）。
+    //
+    // **必须在场景已经摆好之后调。** 只在 reset() 里调的话，基线会是那个空场景，
+    // populateDefault() 摆进去的默认场景就成了「一次未提交的改动」，第一次 Ctrl+Z 会把它抹掉。
+    void resetHistoryBaseline();
 
     void populateDefault();
 
@@ -61,7 +74,8 @@ private:
     EditorContext* m_context{ nullptr };
 
     std::filesystem::path m_file;
-    bool m_dirty{ false };
+    // 存盘那一刻的撤销状态编号。见 isDirty()。
+    std::uint64_t m_saved_state_id{ 0 };
 };
 
 } // namespace arti::editor

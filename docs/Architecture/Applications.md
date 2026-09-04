@@ -35,6 +35,7 @@ EditorLayer                    渲染设备、Renderer、ImGuiHost、SceneRender
 ├── EditorProject              打开的项目：AssetPipeline + GPUAssetCache
 │                              两者生命周期都绑在项目上 —— 换项目要重扫 .meta、重传 GPU 资源
 ├── EditorContext              World + 选中实体 + Edit/Simulate/Play 三态 + 模拟前的快照
+│   └── EditHistory            撤销 / 重做栈（整场景快照，见「撤销」一节）
 ├── SceneDocument              「哪个场景文件」：新建 / 打开 / 存 / 另存 / 脏标记 / 记住上次
 ├── EditorCamera               Edit / Simulate 的相机（Play 用场景里的 primary）
 ├── EditorGizmo                ImGuizmo 变换手柄（translate / rotate / scale，local / world）
@@ -133,6 +134,7 @@ exitToEdit()              world.scene().copyEntitiesFrom(snapshot)  原样拷回
 | `EditorLayer::handleShortcuts()` | `Ctrl+N` / `Ctrl+O` | 新建 / 打开场景 |
 | | `Ctrl+S` / `Ctrl+Shift+S` | 存 / 另存场景 |
 | | `Ctrl+D` | 复制选中实体（连子树） |
+| | `Ctrl+Z` / `Ctrl+Y` | 撤销 / 重做（见下一节） |
 | | `Del` | 删除选中实体（连子树） |
 | `EditorGizmo::handleShortcuts()` | `W` / `E` / `R` | 手柄切 translate / rotate / scale |
 
@@ -155,12 +157,10 @@ exitToEdit()              world.scene().copyEntitiesFrom(snapshot)  原样拷回
 
 **模拟中不许存场景**（`canSaveScene()` 判 `isSimulating()`，菜单项和 `Ctrl+S` 都吃这条）。
 理由：Simulate / Play 期间物理一直在往场景里写 transform，而 `World::saveScene()` 序列化的就是
-那个活场景 —— 存下去等于把盒子掉落后的姿态盖在编辑好的场景上，而且没有 undo 能救。编辑期
-那一份原样躺在快照里，Stop 之后才回来。新建和打开则不受限：它们从 `SceneDocument::reset()`
-走，那里会无条件退到 Edit。
+那个活场景 —— 存下去等于把盒子掉落后的姿态盖在编辑好的场景上。编辑期那一份原样躺在快照里，
+Stop 之后才回来。新建和打开则不受限：它们从 `SceneDocument::reset()` 走，那里会无条件退到 Edit。
 
-**`Ctrl+Z` / `Ctrl+Y` 刻意没接** —— 没有 undo 栈。菜单里那两项仍然是灰的：灰着的菜单项说的是
-实话，能按下去却没反应的快捷键不是。
+`Del` 那一下**现在能撤销了**，但那道 `WantTextInput` 的显式防线不要拆：能救回来仍然不如别误删。
 
 复制和删除都走 `HierarchyPanel::request*()`，真正的改动推迟到下一次 `draw()` 的开头执行 ——
 不在遍历实体、画着 ImGui 树的中途改 registry，而且**刻意放在 `ImGui::Begin()` 之前**：
@@ -171,6 +171,58 @@ Hierarchy 折叠着的时候 `Begin()` 返回 false 会直接 return，放在后
 Play 模式下两个都不给（判 `isGameView()`），Simulate 下都允许。Simulate 下的代价各不相同：
 复制出来的实体没有刚体（物理世界不会为它重建），而删除是安全的 —— `PhysicsSystem` 已经处理了
 「写回时实体没了」，且 Stop 之后场景从快照恢复，模拟中删掉的实体会自己回来。
+
+### 撤销 / 重做
+
+`EditHistory`（`Tools/scene_editor/src/edit_history.h`），挂在 `EditorContext` 上。一条历史项 =
+**整个场景序列化出来的那段文本** + 当时选中的实体。
+
+**为什么是整场景快照而不是命令模式**：场景的写入点有 42 处以上，全都是把组件字段的地址交给
+ImGui 控件、控件当场改掉它（`inspector_panel.cpp` 里那一片 `drawFloatRow(..., &light->intensity,
+...)`），中间没有任何可以插钩子的层。命令模式的接入成本是「控件数 × 一个命令类」，而且每加一个
+字段都要记得再加一个 —— 漏一个的症状是「这个字段撤不回来」，只有手动试到那个字段才会发现。
+快照式的接入成本和字段数无关。代价是粒度只到「整个场景」（一次交互 = 一条历史项），
+以及每条历史项都是一份全量拷贝（上限 64 条 / 64 MiB，从最旧的一端丢）。
+
+**为什么存序列化文本而不是 `Scene` 克隆**（克隆更快更省，Play 模式的快照走的就是那条路）：
+文本能直接比较，于是「这次交互到底改了什么没有」变成一行代码，而且是精确的。由此得到两个连锁
+的好处 —— 一是**不可能产生空历史项**（点一下不改东西的控件、每帧无条件重写同一个值的钳制代码
+都不会污染历史栈），二是**因此提交时机允许写得粗**。第二条才是真正的收益：
+`inspector_panel.cpp` 一行都不用改。
+
+「文本相同 ⇔ 场景相同」这一条成立，靠的是 `SceneSerializer` 把实体按 UUID、组件按类型名都排过序
+（规范形式）。`ctest` 里的 `scene_snapshot_smoke` 用「同样的内容、相反的创建顺序，dump 必须逐字节
+相同」钉着它 —— 那条塌了，编辑器里会凭空冒出一堆「按了 Ctrl+Z 却什么都没变」的历史项。
+
+提交时机（都在 `EditorLayer::onImGuiRender()` 的帧末，此时面板和 gizmo 都画完了）：
+
+| 信号 | 覆盖 |
+| --- | --- |
+| `ImGui::IsAnyItemActive()` 的**下降沿** | 所有 Inspector 控件、改名、菜单项、按钮、下拉框。一次拖拽从按下到松开 `ActiveId` 一直在，只有松开那帧掉沿 —— 所以**整条拖拽合成一条历史项** |
+| `EditorGizmo::isUsing()` 的**下降沿** | gizmo 拖拽（它不是 ImGui 的 item，ImGuizmo 自己管状态） |
+| `EditHistory::requestCommit()` | 只给**不经过 ImGui 控件**的改动：延迟到下一帧落地的复制 / 删除、右键菜单里的建实体、拖资产进 Viewport。多报一次是无害的 —— 没变就不会压历史项 |
+
+两条限制，都和 `canSaveScene()` 同源：
+
+- **模拟中不记历史、不许撤销。** 物理每个固定步都在写 transform，记下去就是一栈「盒子又掉了两
+  厘米」。而模拟期间的改动本来就落在快照上、Stop 就原样回来，所以「撤销一次模拟」已经是免费的。
+- **交互进行中不许撤销**（`canEditHistory()` 判 `IsAnyItemActive()` 和 `isUsing()`）：一边按着
+  拖动框一边按 `Ctrl+Z`，ImGui 的 `ActiveId` 还指着那个控件，而它背后的组件已经被整个换掉了。
+
+选中一起进历史，取的是**提交那一帧开始时**的选中（`beginFrame()`）。删除是在
+`HierarchyPanel::draw()` 开头落地的，落地时会清掉选中 —— 取帧末的话「删掉 E」这条历史项记的
+选中是空，撤销回去 E 回来了却没被选中；取帧初记的是 E，撤销回去直接选上。
+选中变化本身不产生历史项（文本没变）。
+
+**脏标记由历史推导**：`SceneDocument::isDirty()` = 当前状态编号 ≠ 存盘时记下的编号。所以它是
+精确的（以前只有「拖资产进 Viewport」那一处置位，Inspector 改数、拖 gizmo、建 / 删实体全都不算
+脏），而且**撤销回存盘时的那个状态会自动变回干净**。工具栏上模式后面那个 `*` 就是它。
+
+**已知边界：只有序列化过的组件能撤销。** 现在八个引擎组件既注册了拷贝也注册了序列化，所以此刻
+没有差别；但「注册了拷贝、没注册序列化」的运行时组件是允许存在的（见 [Scene.md](Scene.md) 第 6
+节），那种组件撤不回来，而且不会报错。**「撤销对某个字段不生效」的第一嫌疑人是面板的缓存**：
+Inspector 里几个 UUID 输入框每帧都会把缓存的文本写回组件，缓存不跟组件对账的话撤销会被它吃掉
+（Environment 那个已经修了，加组件时照 MeshRenderer 的样子做）。
 
 ## 3. arti_player
 

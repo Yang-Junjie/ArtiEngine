@@ -59,6 +59,14 @@ private:
     bool canDeleteSelection() const;
     void deleteSelection();
 
+    // 撤销 / 重做。同样是菜单项和快捷键共用一套前提 —— 除了「栈里有东西」，还要求不在模拟中、
+    // 且没有正在进行的交互，理由见 .cpp 里 canEditHistory() 的注释。
+    bool canEditHistory() const;
+    bool canUndo() const;
+    void undoEdit();
+    bool canRedo() const;
+    void redoEdit();
+
     // 场景文档那几个动作的前提。同样是菜单项的灰化和快捷键共用 —— 两处分别写会跑偏，
     // 而「菜单里是灰的、快捷键却能按」是最难查的那种不一致。
     bool canChangeScene() const;
@@ -87,6 +95,10 @@ private:
     uint32_t m_frame_index{ 0 };
     rendering::FrameStatistics m_last_statistics;
     bool m_vsync{ true };
+
+    // 「一次交互刚结束」靠下降沿判：这两个存的是上一帧的状态。见 onImGuiRender() 帧末那段。
+    bool m_was_item_active{ false };
+    bool m_was_gizmo_using{ false };
 
     uint32_t m_viewport_width{ 0 };
     uint32_t m_viewport_height{ 0 };

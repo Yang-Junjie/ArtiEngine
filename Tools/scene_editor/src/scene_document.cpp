@@ -1,5 +1,6 @@
 #include "scene_document.h"
 
+#include "edit_history.h"
 #include "editor_context.h"
 #include "editor_paths.h"
 #include "editor_project.h"
@@ -48,12 +49,27 @@ void SceneDocument::reset() {
     m_context->world().clear();
     m_context->clearSelection();
     m_file.clear();
-    m_dirty = false;
+    // 这一下是给「读失败」兜底的：那条路上场景是空的，基线也该是空的。真正的基线由下面
+    // createNew() / load() 在场景摆好之后再给一次。
+    resetHistoryBaseline();
+}
+
+void SceneDocument::resetHistoryBaseline() {
+    auto& history = m_context->history();
+    history.reset(m_context->world(), m_context->selectedEntity());
+    m_saved_state_id = history.currentStateId();
+}
+
+bool SceneDocument::isDirty() const noexcept {
+    return m_context->history().currentStateId() != m_saved_state_id;
 }
 
 void SceneDocument::createNew() {
     reset();
     populateDefault();
+    // 必须在 populateDefault() **之后** —— 否则默认场景成了一次未提交的改动，
+    // 第一次 Ctrl+Z 会把它整个抹掉。
+    resetHistoryBaseline();
     log().info("New scene");
 }
 
@@ -71,11 +87,12 @@ bool SceneDocument::load(const std::filesystem::path& path) {
     // 读失败时 World 会把场景清空并记下原因，这里只负责别留下一个指向没读进来的文件的文件名。
     if (!m_context->world().loadScene(path)) {
         m_file.clear();
+        resetHistoryBaseline();
         return false;
     }
 
     m_file = path;
-    m_dirty = false;
+    resetHistoryBaseline();
     return true;
 }
 
@@ -107,7 +124,8 @@ bool SceneDocument::write(std::filesystem::path path) {
     }
 
     m_file = std::move(path);
-    m_dirty = false;
+    // 只对齐「存盘时是哪个状态」，**不清历史** —— 存一次盘不该让之前的编辑撤不回来。
+    m_saved_state_id = m_context->history().currentStateId();
     rememberInProject(m_file);
     return true;
 }

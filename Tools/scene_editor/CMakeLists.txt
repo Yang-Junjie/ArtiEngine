@@ -1,5 +1,6 @@
 add_executable(scene_editor
     src/application.cpp
+    src/edit_history.cpp
     src/editor_layer.cpp
     src/editor_camera.cpp
     src/editor_context.cpp
@@ -49,6 +50,27 @@ set_target_properties(scene_editor PROPERTIES
     FOLDER "Tools/Editors"
     OUTPUT_NAME "scene_editor"
 )
+
+if(BUILD_TESTING)
+    # 撤销栈的行为测试。编辑器是可执行不是库，所以这里把 edit_history.cpp **直接编进来** ——
+    # 为它单独拆一个静态库只为了测一个文件，不值得。
+    #
+    # 它顺带守着一条约束：edit_history.cpp 不许依赖 Application 单例（这个测试里没有
+    # Application，取一下就断言）。GUI 那半边的验收只能人工做，但判断「要不要压一条历史项」
+    # 的逻辑是纯的，钉在这里。
+    add_executable(edit_history_test
+        tests/edit_history_test.cpp
+        src/edit_history.cpp
+    )
+    target_compile_features(edit_history_test PRIVATE cxx_std_20)
+    target_include_directories(edit_history_test PRIVATE src)
+    target_link_libraries(edit_history_test PRIVATE ArtiEngine::Runtime)
+    set_target_properties(edit_history_test PROPERTIES FOLDER "Tests/Tools")
+    add_test(NAME edit_history_test COMMAND edit_history_test)
+    # 不用 stage Vulkan SDK（不建 RenderDevice），CRT 那套要，和 scene_snapshot_smoke 一样。
+    artichoco_stage_msvc_runtime(edit_history_test)
+endif()
+
 # 运行时依赖和内建 shader 拷到 exe 旁边，和 arti_player 一致。
 artichoco_stage_vulkan_sdk_runtime(scene_editor)
 artichoco_stage_msvc_runtime(scene_editor)
