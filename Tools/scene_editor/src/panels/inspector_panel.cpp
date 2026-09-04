@@ -49,9 +49,21 @@ std::unordered_map<core::UUID, MeshRendererEditorState>& meshRendererEditorState
     return states;
 }
 
-// Environment 只有一个 UUID 输入框，不值得为它再开一个 struct。
-std::unordered_map<core::UUID, std::string>& environmentEditorStates() {
-    static std::unordered_map<core::UUID, std::string> states;
+// Environment 的 UUID 输入框。**除了文本还必须记住「上次写进组件的是哪个值」**：
+// drawUuidInput 不是「变了才返回 true」而是「能解析就返回 true」，也就是每帧都往组件里写一次。
+// 只存文本的话，一旦组件从别处被改回旧值（撤销就是这么干的），这里会拿缓存里的新文本再写回去，
+// 那次撤销就**静默失效**了。同步条件和 MeshRenderer 那边一致（见 drawMeshRendererComponent）。
+//
+// initialized 这个位不能省：applied 的初值是 UUID{0}，而「没设贴图」的组件里存的正好也是 0，
+// 光比较 applied 的话第一帧不会同步，输入框会是空的而不是一串 0。
+struct EnvironmentEditorState {
+    std::string text;
+    core::UUID applied{};
+    bool initialized{ false };
+};
+
+std::unordered_map<core::UUID, EnvironmentEditorState>& environmentEditorStates() {
+    static std::unordered_map<core::UUID, EnvironmentEditorState> states;
     return states;
 }
 
@@ -478,19 +490,20 @@ void InspectorPanel::drawEnvironmentComponent(scene::Entity& entity) {
         return;
     }
 
-    auto& text = environmentEditorStates()[entity.getComponent<scene::IDComponent>().id];
-    if (text.empty()) {
-        text = uuidToText(environment->equirect_texture.id());
+    auto& state = environmentEditorStates()[entity.getComponent<scene::IDComponent>().id];
+    if (!state.initialized || environment->equirect_texture.id() != state.applied) {
+        state.text = uuidToText(environment->equirect_texture.id());
+        state.applied = environment->equirect_texture.id();
+        state.initialized = true;
     }
 
     beginPropertyGrid();
 
     propertyRow("Equirect Texture");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-    core::UUID applied{};
-    if (drawUuidInput("##equirect_uuid", text, applied)) {
+    if (drawUuidInput("##equirect_uuid", state.text, state.applied)) {
         environment->equirect_texture =
-                arti::asset::AssetHandle<engine::asset::TextureAsset>{ applied };
+                arti::asset::AssetHandle<engine::asset::TextureAsset>{ state.applied };
     }
 
     drawBoolRow("Enabled", &environment->enabled);
