@@ -8,7 +8,10 @@
 #include "artichoco/scene/scene_serializer.h"
 #include "artichoco/scene/system.h"
 
+#include <yaml-cpp/yaml.h>
+
 #include <exception>
+#include <string>
 
 namespace arti::engine {
 
@@ -48,6 +51,33 @@ bool World::saveScene(const std::filesystem::path& path) const {
         m_serializer->save(*m_scene, path);
     } catch (const std::exception& exception) {
         getLogChannel().error("Failed to save the scene '{}': {}", path.string(), exception.what());
+        return false;
+    }
+    return true;
+}
+
+std::string World::captureScene() const {
+    try {
+        YAML::Emitter emitter;
+        emitter << m_serializer->serialize(*m_scene);
+        if (!emitter.good()) {
+            getLogChannel().error("Failed to emit a scene snapshot: {}", emitter.GetLastError());
+            return {};
+        }
+        return std::string{ emitter.c_str() };
+    } catch (const std::exception& exception) {
+        getLogChannel().error("Failed to capture a scene snapshot: {}", exception.what());
+        return {};
+    }
+}
+
+bool World::restoreScene(std::string_view text) {
+    try {
+        // YAML::Load 没有 string_view 的重载，这里必须实体化一份。
+        m_serializer->deserialize(YAML::Load(std::string{ text }), *m_scene);
+    } catch (const std::exception& exception) {
+        // 刻意不清场景、不动时钟，理由见头文件。
+        getLogChannel().error("Failed to restore a scene snapshot: {}", exception.what());
         return false;
     }
     return true;

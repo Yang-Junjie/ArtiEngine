@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <string>
+#include <string_view>
 
 namespace arti::scene {
 class Scene;
@@ -36,6 +38,26 @@ public:
     // 时钟一并归零：换了场景，上一个场景攒下的固定步长余额没有意义。
     bool loadScene(const std::filesystem::path& path);
     bool saveScene(const std::filesystem::path& path) const;
+
+    // 场景 ↔ 内存里的一段文本。内容和 saveScene() 写进文件的完全一样，所以「存盘」和「快照」
+    // 走的是同一条序列化路径，不会各自漂移。编辑器的撤销栈就是一叠这个（见
+    // docs/tasks/2026-09-04-editor-undo-redo.md 的 D4）。
+    //
+    // 返回 std::string 而不是 YAML::Node：一是这个头不用拖 yaml-cpp，二是文本才是能比较、
+    // 能哈希、能打出来看的形式 —— 撤销栈靠「文本相同 ⇔ 场景相同」来判断这一次交互到底改了
+    // 什么没有，而那一条成立是因为 SceneSerializer 把实体按 UUID、组件按类型名都排过序。
+    std::string captureScene() const;
+
+    // 用 captureScene() 的文本替换当前场景。
+    //
+    // **失败时场景一点不变**，这和 loadScene() 刻意不同（那个失败时会清空）：读文件失败意味着
+    // 「你要的场景不存在」，留半个更糟；而恢复一条历史项失败意味着历史栈坏了，这时候再把用户
+    // 正在编辑的场景清掉纯属雪上加霜。这个性质是免费的 —— deserialize 先建 staging 场景并校验，
+    // 抛异常都发生在替换之前。
+    //
+    // 也**不动时钟**：恢复历史项不是换场景，而且它只在编辑模式下用，时钟根本没在跑。归零反而
+    // 会让物理在下一次进 Simulate 时多重建一次世界（帧号回退是它的重建信号）。
+    bool restoreScene(std::string_view text);
 
     // 清空实体并归零时钟。
     void clear();

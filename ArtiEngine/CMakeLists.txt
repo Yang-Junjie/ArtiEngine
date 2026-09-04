@@ -86,6 +86,16 @@ if(BUILD_TESTING)
     add_test(NAME physics_smoke COMMAND physics_smoke)
     # 不用 stage Vulkan SDK：它一个 DLL 都不链。CRT 那套还是要的，和 asset_pipeline_smoke 一样。
     artichoco_stage_msvc_runtime(physics_smoke)
+
+    # 场景快照的往返。和 physics_smoke 相反，这个**要**链 artiengine_runtime —— 它测的就是
+    # World 自己。不用 stage Vulkan SDK：它链进了渲染类型，但从不创建 RenderDevice
+    # （和 asset_tools 是同一种情况）。
+    add_executable(scene_snapshot_smoke runtime/tests/scene_snapshot_smoke.cpp)
+    target_compile_features(scene_snapshot_smoke PRIVATE cxx_std_20)
+    target_link_libraries(scene_snapshot_smoke PRIVATE ArtiEngine::Runtime)
+    set_target_properties(scene_snapshot_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
+    add_test(NAME scene_snapshot_smoke COMMAND scene_snapshot_smoke)
+    artichoco_stage_msvc_runtime(scene_snapshot_smoke)
 endif()
 
 # ImGui 宿主单独一个 target：它要链 SDL 和 imgui 的 SDL3 后端，不该让核心库的下游都背上。
