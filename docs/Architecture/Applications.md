@@ -224,6 +224,44 @@ ImGui 控件、控件当场改掉它（`inspector_panel.cpp` 里那一片 `drawF
 Inspector 里几个 UUID 输入框每帧都会把缓存的文本写回组件，缓存不跟组件对账的话撤销会被它吃掉
 （Environment 那个已经修了，加组件时照 MeshRenderer 的样子做）。
 
+### 脚本能用什么
+
+Lua 脚本是资产（`.lua` → `.artiscript`），挂在实体的 `ScriptComponent` 上，在 Simulate / Play 里
+跑。机制、生命周期和那六条规矩在 [Scene.md](Scene.md#32-脚本update-唯一的消费者)，这里只列 API。
+
+```lua
+function on_create(entity) end          -- 三个都是可选的，缺哪个跳过哪个
+function on_update(entity, dt) end
+function on_destroy(entity) end
+```
+
+`entity`：
+
+| | |
+| --- | --- |
+| `entity.uuid` | 字符串，只读 |
+| `entity.name` | Tag，可读写 |
+| `entity.translation` | `{x, y, z}` 表，可读写 |
+| `entity.rotation_euler` | 度数的 `{x, y, z}`，可读写（和 Inspector 一致，内部存四元数） |
+| `entity.scale` | `{x, y, z}` 表，可读写 |
+| `entity:destroy()` | 删掉这个实体（连子树） |
+
+读出来的是**一份拷贝**，改完要写回去 —— `t = entity.translation; t.x = t.x + 1;
+entity.translation = t`。直接 `entity.translation.x = 1` 改的是那份临时表，不会生效。
+
+全局 `arti`：
+
+| | |
+| --- | --- |
+| `arti.input.is_key_pressed(name)` | `"A"`–`"Z"`、`"Space"`、`"Escape"`、`"Shift"`、`"Ctrl"`。认不出的名字返回 false 并 warn **一次**（按名字去重，不会每帧刷屏） |
+| `arti.physics.raycast(origin, translation)` | 命中返回 `{uuid, point, normal, fraction}`，否则 `nil`。**`translation` 是位移向量**，不是「方向 × 长度」的另一种写法 |
+| `arti.scene.find_by_tag(name)` | 找不到返回 `nil` |
+| `arti.scene.spawn_prefab(uuid_string)` | 按节点树生成实体，返回根；资产不存在 / 加载失败返回 `nil` |
+| `arti.log.info/warn/error(message)` | 走 `ArtiEngine` 日志通道 |
+
+**v1 刻意没有的**：每实例属性表（脚本自己读别的组件；要做得先想清楚反射、Inspector 怎么画、
+哪些键进快照）、加 / 删组件、改刚体参数、场景切换、`require` 跨脚本、协程。
+
 ## 3. arti_player
 
 `Runtime/player`。一层 `PlayerLayer`，只有胶水。

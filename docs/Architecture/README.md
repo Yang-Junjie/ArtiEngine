@@ -39,6 +39,7 @@
 │  ArtiSDK   Vulkan · GLM · SDL3 · Slang（都从 Vulkan SDK 取）│
 │  第三方    NVRHI · EnTT · spdlog · enkiTS · yaml-cpp      │
 │            ImGui · ImGuizmo · cgltf · stb_image · Box3D  │
+│            Lua 5.4 · sol2                                │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -54,7 +55,7 @@
 | `ArtiChoco::Project` | `.artiproj` 的读写与 `Assets` / `Library/Artifacts` 两个根 | 其他一切 |
 | `ArtiRenderer::Renderer` | 从 `RenderScene`（网格 + 材质 + 灯光 + 环境）到画面：延迟管线、IBL、tone mapping、GPU 拾取、调试线 | 场景怎么组织、资产怎么来的 |
 | `ArtiEngine::Engine` | 引擎的**数据模型**：四种资产类型、三个 importer、四个 loader、八个游戏组件、`Scene → RenderScene` 抽取 | 主循环、窗口 |
-| `ArtiEngine::Runtime` | **驱动**数据模型的循环：`World` 的 tick、刚体物理（Box3D）、资产工作区、一帧的 prepare / submit | UI、编辑器状态 |
+| `ArtiEngine::Runtime` | **驱动**数据模型的循环：`World` 的 tick、刚体物理（Box3D）、Lua 脚本（sol2）、资产工作区、一帧的 prepare / submit | UI、编辑器状态 |
 | `ArtiEngine::ImGui` | ImGui 上下文、SDL3 事件桥、字体、docking，产出 `FrameOverlay` | 画什么面板 |
 
 ## 3. target 依赖
@@ -72,7 +73,7 @@
 | `ArtiChoco::Project` | 静态库 | Core · yaml-cpp |
 | `ArtiRenderer::Renderer` | 静态库 | ArtiChoco::{Core, Renderer} · `ArtiSDK::Slang`(P) |
 | `ArtiEngine::Engine` | 静态库 | `ArtiRenderer::Renderer` · ArtiChoco::{Core, Scene, Asset} · cgltf(P) · stb(P) |
-| `ArtiEngine::Runtime` | 静态库 | `ArtiEngine::Engine` · box3d(P) |
+| `ArtiEngine::Runtime` | 静态库 | `ArtiEngine::Engine` · box3d(P) · Sol2 + Lua(P) |
 | `ArtiEngine::ImGui` | 静态库 | `ArtiEngine::Engine` · `ImGui::Core` · ArtiChoco::Platform(P) · SDL3(P) · `ImGui::SDL3Backend`(P) |
 | `ArtiTools::Asset` | 静态库 | `ArtiEngine::Runtime` · `ArtiChoco::Project` |
 | `ArtiTools::Platform` | 静态库 | ole32 · shell32（仅 Windows） |
@@ -86,7 +87,8 @@
 
 - **`Engine` 和 `Runtime` 分成两个库**。`Engine` 是数据模型，`Runtime` 是驱动它的循环 ——
   这条界限已经兑现过一次：物理（box3d）进的是 `Runtime`，而且是 PRIVATE，所以只消费数据类型的
-  目标看不见 box3d 的头。将来的脚本 VM 同理。**代价**：`ArtiTools::Asset` 链 `Runtime`，所以
+  目标看不见 box3d 的头。**这条界限已经兑现过两次**：物理（box3d）和脚本 VM（Lua + sol2）
+  都是这么进的 —— 两者的类型都不出现在公开头里。**代价**：`ArtiTools::Asset` 链 `Runtime`，所以
   `asset_tools` 会跟着链上 box3d 但永远不建物理世界 —— 和它链了 Vulkan 却从不建 `RenderDevice`
   是同一种情况。真嫌重的话，出路是把 `AssetPipeline` 从 `Runtime` 上摘下来。
 - **ImGui 宿主单独一个库**。它要链 SDL3 和 imgui 的 SDL3 后端；核心库的下游不该因为
@@ -156,7 +158,7 @@ ArtiEngine/          引擎层源码
 Runtime/player/      独立播放器
 Tools/               编辑器、CLI、工具专用平台代码、UI 资源（字体）
 ArtiRenderer/        submodule（内含嵌套 submodule ArtiChoco 和 imgui）
-third_party/         ImGuizmo、box3d（都是 submodule）、cgltf
+third_party/         ImGuizmo、box3d、lua、sol2（都是 submodule）、cgltf
 projects/            示例项目（既是手动验证场地，也是磁盘布局的活文档）
 docs/Architecture/   本目录
 ```
@@ -169,9 +171,10 @@ docs/Architecture/   本目录
   Assets/                      源文件 + 每个源文件一份 .meta ← 唯一真相，进版本控制
     Model/DamagedHelmet/DamagedHelmet.gltf(+.meta)
     Scenes/1.artiscene
+    Scripts/wasd_move.lua(+.meta)
     Skybox/newport_loft.hdr(+.meta)
   Library/Artifacts/           完全可推导，可随时删
-    Imported/<uuid>.arti{mesh,texture,material,prefab}
+    Imported/<uuid>.arti{mesh,texture,material,prefab,script}
     Builtin/{Cube,Sphere}.mesh · Default.material
 ```
 
@@ -224,11 +227,14 @@ cmake --build --preset debug
   而独立 clang 走 MSVC ABI 时 `MSVC` 是空的），所以发现逻辑自己写在 `ArtiMsvcRuntime.cmake`。
 - `ARTIENGINE_BUILD_TOOLS=OFF` 可以只建引擎和播放器。`Runtime/` 没有开关 —— 运行时是交付物，
   不是可选工具。
-- 测试：`ctest`，10 条。ArtiEngine 侧四条：`asset_pipeline_smoke`（资产流水线）、
-  `physics_smoke`（只链 box3d，不碰引擎）、`scene_snapshot_smoke`（场景 ↔ 文本的往返与规范形式）、
-  `edit_history_test`（编辑器的撤销栈逻辑）。另外六条来自 ArtiRenderer / ArtiChoco 自己的单元测试
-  （`ARTIRENDERER_BUILD_TESTS=ON` 白捡的那几个）。**渲染画面本身没有自动化覆盖** ——
-  阴影、剔除这类都靠人工比对截图。
+- 测试：`ctest`，15 条。本仓库自己的九条：`asset_pipeline_smoke`（资产流水线，含脚本导入那组）、
+  `physics_smoke`（只链 box3d，不碰引擎）、`physics_raycast_smoke`（射线查询翻成引擎类型那层）、
+  `physics_transform_ownership_smoke`（Dynamic 归物理 / Static·Kinematic 归场景）、
+  `scene_snapshot_smoke`（场景 ↔ 文本的往返与规范形式）、`prefab_instantiate_smoke`（节点树 →
+  实体层级）、`lua_vm_smoke`（沙箱白名单 + 错误不穿透，**不链引擎**）、`script_runtime_smoke`
+  （端到端：导入 `.lua` → 挂实体 → tick → transform 变了）、`edit_history_test`（撤销栈逻辑）。
+  另外六条来自 ArtiRenderer / ArtiChoco 自己的单元测试（`ARTIRENDERER_BUILD_TESTS=ON` 白捡的）。
+  **渲染画面本身没有自动化覆盖** —— 阴影、剔除这类都靠人工比对截图。
 
 代码风格约定：4 空格、100 列、LF。仓库根有 `.clang-format`，但**既有文件并没有按它格式化
 过** —— 改老文件时手写成周围的风格，不要跑格式化工具，否则 diff 里全是与改动无关的噪声。
@@ -263,8 +269,10 @@ cmake --build --preset debug
 | 阴影的视锥剔除 | **已做**。判据是每级 cascade 的光空间 XY 重叠，**不是**相机视锥。Z 方向不另判：near/far 就是按 XY 重叠的投射体撑开的。详见 Rendering.md 第 9 节 |
 | 源内容变更检测 | `.meta` 的 `ContentHash` / `Size` / `Importer.Version` **只写不读**。目前只有 artifact 缺失才触发重导，改了源文件内容必须手动重导 |
 | 多线程的消费者 | **任务系统本身已经有了**（`arti::core::TaskSystem`，enkiTS 封装：fork-join、带句柄的异步任务、钉线程任务、`TaskGraph` 依赖图，文档见 `core/task/README.md`），但**一个真实消费者都还没接**。每个接入点的位置和它该调的 API 列在下面那张表里 |
-| 脚本 / 音频 | 完全没有。`Update` / `LateUpdate` 两个 stage 空着在跑，是它们现成的挂载点（`FixedUpdate` 现在被物理占了） |
-| 物理的其余部分 | 刚体已经有了（球 / 盒 / 胶囊、静态 / 运动学 / 动态、休眠、堆叠）。还没有的：射线查询、触发器（sensor）、关节、三角网格 / 高度场碰撞体、复合体（一个 body 多个 collider）、角色控制器、多线程（桥到任务系统，见 7.1）。Box3D 这些都有，随时能加 —— 但现在没有脚本，查询结果没人消费 |
+| 脚本的剩余部分 | **Lua 脚本已经有了**（`.lua` 是第五种资产、`ScriptComponent`、`ScriptSystem` 挂 `Update`，见 Scene.md 3.2）。还没有的：每实例属性表（脚本只能读别的组件，不能在 Inspector 里配参数）、`require` 跨脚本、协程、热重载（改了 `.lua` 要重导 + 重进 Play）、**prefab 带不了脚本**（`PrefabNode` 只有 mesh / materials） |
+| 音频 | 完全没有。`LateUpdate` 还空着在跑 |
+| 物理的其余部分 | 刚体和**射线查询**已经有了（球 / 盒 / 胶囊、静态 / 运动学 / 动态、休眠、堆叠、`PhysicsSystem::raycast`）。还没有的：触发器（sensor）、关节、三角网格 / 高度场碰撞体、复合体（一个 body 多个 collider）、角色控制器、多线程（桥到任务系统，见 7.1）。Box3D 这些都有，随时能加 —— 现在脚本能消费它们了 |
+| Kinematic 体推不动 Dynamic 体 | Kinematic 的位置由场景驱动（脚本 / gizmo / 动画），物理每步用 `b3Body_SetTransform` 读进去 —— 那是**传送**，不产生推力。所以「电梯把箱子顶起来」「移动平台带着人走」现在不对（推不动或穿透）。出路是按两帧的位差算隐含速度、走 `b3Body_SetLinearVelocity`，那会连带引出「谁定义这个速度」的问题。所有权规则本身见 Scene.md 3.1.1 |
 | 带父级或有缩放的实体不参与模拟 | 物理在世界空间算而 `TransformComponent` 是局部的，带父级要拿父级的世界逆矩阵反算；碰撞体尺寸显式写在组件里、不跟 scale 走。两种情况都记一条 warn 并跳过，所以「一块大地面」要拆成缩放过的视觉体 + 不缩放的碰撞体两个实体 |
 | 渲染插值 | 物理按固定步长跑，画面按帧率画，所以快速运动会有细微抖动。接缝是现成的：`FixedTimestepAccumulator::alpha()`（当前余额占一个固定步的比例）还没人用 |
 | 前向管线 | 已整条移除，只有延迟一条路径。不留双路径是刻意的 |

@@ -34,6 +34,7 @@
 
 | 文件 | 状态 | 一句话 |
 | --- | --- | --- |
+| [2026-09-04-lua-scripting.md](2026-09-04-lua-scripting.md) | 进行中 | Lua 脚本：`.lua` 第五种资产 + ScriptComponent + Play 里真跑。sol2 + Lua 5.4，不先做 C++ 脚本层 |
 | [2026-09-04-editor-undo-redo.md](2026-09-04-editor-undo-redo.md) | 已完成 | 编辑器的 Undo / Redo：场景序列化文本的快照栈。用「文本比较」当变更检测，所以 42 个控件上一个钩子都不用埋。顺带把脏标记从「两处手写」改成精确的 |
 | [2026-09-03-frustum-culling.md](2026-09-03-frustum-culling.md) | 已完成 | 视锥剔除：`Frustum` 类型 + 接到 G-Buffer / 拾取 / 阴影四级，让 `culled` 不再恒为 0。阴影按光空间 XY 重叠判，不是相机视锥 |
 | [2026-09-02-artichoco-job-system.md](2026-09-02-artichoco-job-system.md) | 已完成 | 把 ArtiChoco 的 `TaskSystem` 做成真能用的 job system：进程级、句柄、依赖图、优先级、线程命名 + 第一个 ctest。**不接消费者**，只留接口 |

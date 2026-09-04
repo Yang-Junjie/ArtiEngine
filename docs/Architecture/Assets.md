@@ -23,7 +23,7 @@ catalog 里的 User 集合      =  磁盘 .meta 的纯函数
 删掉 `Library/` 再 reconcile，一切恢复且 **UUID 不变**（身份存在 `.meta` 里）。删掉某个
 `.meta`，那个资产会被重新导入并拿到**新 UUID**，场景引用会断。
 
-## 2. 四种资产类型
+## 2. 五种资产类型
 
 `ArtiEngine/asset/`。每种都继承 `arti::asset::Asset`，有一个稳定的类型串（进 `.meta`，
 改名就是改文件格式）。
@@ -34,6 +34,7 @@ catalog 里的 User 集合      =  磁盘 .meta 的纯函数
 | 纹理 | `artiengine.asset.texture` | `.artitexture` | 二进制 `TEXA` | 已解码的 texel、宽高、`TextureFormat`、要不要生成 mip |
 | 材质 | `artiengine.asset.material` | `.artimaterial` | YAML | PBR 参数 + 五张贴图的 handle |
 | Prefab | `artiengine.asset.prefab` | `.artiprefab` | YAML | 节点树，每个节点记 local transform、parent、mesh UUID、materials UUID |
+| 脚本 | `artiengine.asset.script` | `.artiscript` | UTF-8 文本 | 一段 Lua 源码，和源文件**逐字节相同** |
 
 二进制的两种（网格、纹理）都是体量大、结构固定的；YAML 的两种（材质、prefab）小、需要
 人能读能 diff。网格 artifact 里有 `static_assert(sizeof(MeshVertex) == 56)` —— 顶点布局
@@ -61,9 +62,14 @@ MaterialAsset  引用 texture handle
 | `artiengine.GltfImporter` | `.gltf` `.glb` | 材质 / 网格 / prefab 子资产；外部贴图**不重复解码**，查已导入的纹理 handle |
 | `artiengine.TextureImporter` | `.png .jpg .jpeg .bmp .tga .gif .hdr` | 一张纹理（`Colorspace` 设置决定 sRGB / Unorm） |
 | `artiengine.MaterialImporter` | `.artimaterial` | 一个材质（`.artimaterial` 是**真实源文件**，不是特例） |
+| `artiengine.ScriptImporter` | `.lua` | 一份脚本。没有设置、没有子资产、没有跨源引用 —— artifact 就是源文件的拷贝 |
 
-loader 四个，和四种资产一一对应，都是无状态的纯解码器：`MeshLoader` / `TextureLoader` /
-`MaterialLoader` / `PrefabLoader`。
+loader 五个，和五种资产一一对应，都是无状态的纯解码器：`MeshLoader` / `TextureLoader` /
+`MaterialLoader` / `PrefabLoader` / `ScriptLoader`。
+
+**脚本为什么也走这条管线**（而不是像 `.artiscene` 那样按项目根相对路径引用）：走了它就自动
+拿到 UUID 身份、`.meta`、reconcile、以及**跟着 `pack` 走**（`pack` 整树拷 `Library/Artifacts/`，
+但 `Assets/` 下只拷 `.artiscene`）。发布出去的游戏因此只读 artifact，不需要 `.lua` 源文件在场。
 
 `.artimaterial` 既是源文件又是 artifact 扩展名，这不是巧合：编辑器创作的材质就是普通的
 Root 资产，管线因此不需要「无源文件的用户资产」这种特例。源文件里贴图用**路径**引用
