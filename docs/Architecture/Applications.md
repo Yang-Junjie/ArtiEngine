@@ -39,7 +39,7 @@ EditorLayer                    渲染设备、Renderer、ImGuiHost、SceneRender
 ├── EditorCamera               Edit / Simulate 的相机（Play 用场景里的 primary）
 ├── EditorGizmo                ImGuizmo 变换手柄（translate / rotate / scale，local / world）
 └── panels/
-    ├── HierarchyPanel         实体树、创建 / 删除 / 改父子
+    ├── HierarchyPanel         实体树、创建 / 删除（Del）/ 复制（Ctrl+D）/ 改父子
     ├── InspectorPanel         选中实体的组件：Transform / Camera / MeshRenderer /
     │                          三种光源 / Environment / RigidBody / Collider
     ├── ContentBrowserPanel    Assets/ 树 + 选中项预览
@@ -123,6 +123,54 @@ exitToEdit()              world.scene().copyEntitiesFrom(snapshot)  原样拷回
 所以实现里不带 `#ifdef`。目前只有 Windows 一支（`IFileDialog`）。
 
 `View / VSync` 切垂直同步，运行时重建 swapchain。启动参数 `--no-vsync` 一样。
+
+### 键盘快捷键
+
+两个分派点，都在 `onImGuiRender()` 里、**在画面板之前**：
+
+| 分派点 | 键 | 做什么 |
+| --- | --- | --- |
+| `EditorLayer::handleShortcuts()` | `Ctrl+N` / `Ctrl+O` | 新建 / 打开场景 |
+| | `Ctrl+S` / `Ctrl+Shift+S` | 存 / 另存场景 |
+| | `Ctrl+D` | 复制选中实体（连子树） |
+| | `Del` | 删除选中实体（连子树） |
+| `EditorGizmo::handleShortcuts()` | `W` / `E` / `R` | 手柄切 translate / rotate / scale |
+
+两点实现上的取舍：
+
+- **带修饰键的走 `ImGui::Shortcut()` + `RouteGlobal`**，不走 `IsKeyChordPressed()`：前者带焦点
+  路由，在输入框里打字不会误触发。`Ctrl+S` 和 `Ctrl+Shift+S` 不需要排先后 —— ImGui 要求
+  修饰键**精确匹配**，按着 Shift 时 `Ctrl+S` 那条根本不成立。
+- **光秃秃的字母 / 功能键额外靠 `GetIO().WantTextInput` 让路**：没有修饰键兜底，不挡的话在
+  Inspector 里改个名字就顺手把手柄模式换了（`W` / `E` / `R`），或者想删掉一个打错的字符却
+  删掉了整个实体（`Del` —— 那一下不可撤销，所以除了 `Shortcut()` 的路由再显式挡一道）。
+  编辑器相机的 WASD 走 `core::Input`，是另一条路。
+
+`Del` 的语义固定是「删掉选中的实体」，不随焦点面板变 —— 整个编辑器只有一份选中状态
+（`EditorContext::m_selected_entity`），Content Browser 那边也没有删除操作。
+
+每个快捷键都和对应菜单项**共用同一个前提判断**（`canChangeScene()` / `canSaveScene()` /
+`canDuplicateSelection()` / `canDeleteSelection()`）。「菜单里是灰的、快捷键却能按」是最难查的
+那种不一致，所以判断只写一处。
+
+**模拟中不许存场景**（`canSaveScene()` 判 `isSimulating()`，菜单项和 `Ctrl+S` 都吃这条）。
+理由：Simulate / Play 期间物理一直在往场景里写 transform，而 `World::saveScene()` 序列化的就是
+那个活场景 —— 存下去等于把盒子掉落后的姿态盖在编辑好的场景上，而且没有 undo 能救。编辑期
+那一份原样躺在快照里，Stop 之后才回来。新建和打开则不受限：它们从 `SceneDocument::reset()`
+走，那里会无条件退到 Edit。
+
+**`Ctrl+Z` / `Ctrl+Y` 刻意没接** —— 没有 undo 栈。菜单里那两项仍然是灰的：灰着的菜单项说的是
+实话，能按下去却没反应的快捷键不是。
+
+复制和删除都走 `HierarchyPanel::request*()`，真正的改动推迟到下一次 `draw()` 的开头执行 ——
+不在遍历实体、画着 ImGui 树的中途改 registry，而且**刻意放在 `ImGui::Begin()` 之前**：
+Hierarchy 折叠着的时候 `Begin()` 返回 false 会直接 return，放在后面就会让 `Ctrl+D` / `Del`
+在那种状态下静默失灵。删完按「选中的还在不在」清选中，而不是比对「删掉的是不是选中的那个」
+—— `destroyEntity()` 连整棵子树一起删，删一个祖先也会带走选中的实体。
+
+Play 模式下两个都不给（判 `isGameView()`），Simulate 下都允许。Simulate 下的代价各不相同：
+复制出来的实体没有刚体（物理世界不会为它重建），而删除是安全的 —— `PhysicsSystem` 已经处理了
+「写回时实体没了」，且 Stop 之后场景从快照恢复，模拟中删掉的实体会自己回来。
 
 ## 3. arti_player
 

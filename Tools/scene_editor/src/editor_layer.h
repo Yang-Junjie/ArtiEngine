@@ -48,8 +48,21 @@ private:
 
     void drawMenuBar();
     void drawToolbar();
+    // 编辑器级的键盘快捷键（面板自己的快捷键归它自己，gizmo 的 W / E / R 在 EditorGizmo 里）。
+    void handleShortcuts();
     void updateEditorCamera(float deltaTime);
     void submitSelectionGizmos();
+
+    // 当前选中的实体能不能被复制 / 删除。菜单项的灰化和快捷键共用它们，免得两处判断跑偏。
+    bool canDuplicateSelection() const;
+    void duplicateSelection();
+    bool canDeleteSelection() const;
+    void deleteSelection();
+
+    // 场景文档那几个动作的前提。同样是菜单项的灰化和快捷键共用 —— 两处分别写会跑偏，
+    // 而「菜单里是灰的、快捷键却能按」是最难查的那种不一致。
+    bool canChangeScene() const;
+    bool canSaveScene() const;
 
     // 把 Content Browser 拖出来的资产在 Viewport 上放下来生成场景实体。
     void handleViewportAssetDrop(float rect_x, float rect_y, float rect_width, float rect_height);

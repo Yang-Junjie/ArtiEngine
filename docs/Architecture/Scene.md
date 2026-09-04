@@ -19,6 +19,12 @@ EnTT 之上的 ECS，`Scene` 是门面和聚合根。每个实体自带五个必
 层级只能通过 `Scene::setParent()` 改 —— 它会校验场景归属、拒绝自环和成环。世界变换在每次
 `runSystems()` 之前更新，只重算局部变换 / 父级 / 脏标记变过的分支。
 
+`Scene::duplicateEntity(entity)` 复制一个实体**连同它整棵子树**，返回新的根：每个副本拿一个
+新 UUID（身份归场景所有，不跟着拷）；新根的父级和源一致，所以副本是源的**兄弟**；子树内部的
+父子关系重映射到副本上。重映射靠的是 `ParentComponent` 存的是 UUID 而不是句柄 —— 查得到
+就换、查不到的只有子树的根（它的父级在子树外），所以根不需要特例。**名字原样照抄**，
+`Cube → Cube (1)` 那种消歧是编辑器的策略，不在场景语义里。
+
 系统分四个 stage：`FixedUpdate` / `Update` / `LateUpdate` / `RenderExtract`。ArtiEngine 目前
 注册了**一个**系统：`PhysicsSystem` 挂在 `FixedUpdate`（见 3.1）。`Update` / `LateUpdate` 还空着
 但循环在跑，是脚本将来的挂载点；抽取是 `SceneRenderer` 直接调的，不走 `RenderExtract`。
@@ -200,7 +206,9 @@ RenderSceneExtractor::extract(scene, gpu_assets, renderer, target) → const Ren
 
 1. `ArtiEngine/scene/components.h` —— 结构本身。
 2. `ArtiEngine/scene/component_registration.cpp` —— `registerComponentCopy<T>()`，否则
-   Play 模式的快照会丢掉它（会记一条 warn，不会崩）。
+   Play 模式的快照会丢掉它（会记一条 warn，不会崩）。**编辑器的 Duplicate 也吃这张注册表**
+   （`Scene::duplicateEntity()` 和快照共用同一份），所以漏注册的后果是两处：Play 一进一出
+   丢字段、复制出来的实体缺组件。
 3. `ArtiEngine/scene/component_serialization.{h,cpp}` —— 实现 `ComponentSerialization<T>`，
    给一个稳定的 `typeName()`，在 `registerSceneSerialization()` 里登记。
 4. 要影响画面的话，`ArtiEngine/scene/render_scene_extractor.cpp` 里加一遍 view 扫描。

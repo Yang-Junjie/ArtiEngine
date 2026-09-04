@@ -7,16 +7,88 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+#include <cctype>
+#include <string>
+#include <string_view>
+
 namespace arti::editor {
+namespace {
+
+// 复制出来的实体改个不重名的名字。**这是编辑器的策略，不是场景的语义** ——
+// `Scene::duplicateEntity()` 原样照抄名字，因为名字本来就不要求唯一（连点两次
+// Create Empty Entity 也会得到两个 "Entity"）。但层级面板里两行一模一样根本分不出谁是谁，
+// 所以这一层补上「Cube → Cube (1)」。
+std::string uniqueTag(scene::Scene& scene, std::string_view tag) {
+    std::string base{ tag };
+    // 先剥掉已有的 " (n)" 后缀，否则复制三次会变成 "Cube (1) (1) (1)"。
+    if (base.size() > 3 && base.back() == ')') {
+        const auto open = base.rfind(" (");
+        if (open != std::string::npos && open + 3 <= base.size() - 1) {
+            const std::string digits = base.substr(open + 2, base.size() - open - 3);
+            const bool all_digits = !digits.empty() &&
+                    std::all_of(digits.begin(), digits.end(),
+                            [](unsigned char c) { return std::isdigit(c) != 0; });
+            if (all_digits) {
+                base.erase(open);
+            }
+        }
+    }
+
+    for (int suffix = 1;; ++suffix) {
+        std::string candidate = base + " (" + std::to_string(suffix) + ")";
+        if (!scene.findEntityByTag(candidate).isValid()) {
+            return candidate;
+        }
+    }
+}
+
+} // namespace
 
 HierarchyPanel::HierarchyPanel(EditorContext& context)
         : m_context(context) {}
 
+void HierarchyPanel::requestDuplicate(core::UUID entity) {
+    m_pending_duplicate = entity;
+}
+
+void HierarchyPanel::requestDelete(core::UUID entity) {
+    m_pending_delete = entity;
+}
+
 void HierarchyPanel::draw() {
     auto& scene = m_context.scene();
 
+    // 上一帧攒下的改动在这里落地，**在 Begin() 之前** —— 面板被折叠时 Begin() 返回 false
+    // 会直接 return，请求留在原处不会丢，但也别指望它当帧生效。Ctrl+D 和 Delete 是全局
+    // 快捷键，折叠着 Hierarchy 按它们也必须有反应，所以这段不能放在那道 return 后面。
+    if (m_pending_duplicate) {
+        auto source = scene.findEntity(*m_pending_duplicate);
+        if (source.isValid()) {
+            auto copy = scene.duplicateEntity(source);
+            copy.getComponent<scene::TagComponent>().tag =
+                    uniqueTag(scene, source.getComponent<scene::TagComponent>().tag);
+            m_context.setSelectedEntity(copy.getUUID());
+        }
+        m_pending_duplicate = std::nullopt;
+    }
+
+    if (m_pending_delete) {
+        auto victim = scene.findEntity(*m_pending_delete);
+        if (victim.isValid()) {
+            scene.destroyEntity(victim);
+        }
+        // 按「选中的还在不在」清，而不是比对「删掉的是不是选中的那个」：destroyEntity()
+        // 连整棵子树一起删，所以删一个祖先也会带走选中的那个实体。
+        const auto& selected = m_context.selectedEntity();
+        if (selected && !scene.findEntity(*selected).isValid()) {
+            m_context.clearSelection();
+        }
+        m_pending_delete = std::nullopt;
+    }
+
     // 窗口被折叠或裁掉时 Begin 返回 false，此时窗口的 SkipItems 为真，后面画什么都进不去，
-    // 白白遍历一遍场景。删除请求下一次可见时再处理，不会丢。
+    // 白白遍历一遍场景。
     if (!ImGui::Begin("Hierarchy")) {
         ImGui::End();
         return;
@@ -49,18 +121,6 @@ void HierarchyPanel::draw() {
     }
 
     ImGui::End();
-
-    if (m_pending_delete) {
-        auto victim = scene.findEntity(*m_pending_delete);
-        if (victim.isValid()) {
-            scene.destroyEntity(victim);
-        }
-        const auto& selected = m_context.selectedEntity();
-        if (selected && *selected == *m_pending_delete) {
-            m_context.clearSelection();
-        }
-        m_pending_delete = std::nullopt;
-    }
 }
 
 void HierarchyPanel::drawEntityNode(core::UUID entity) {
@@ -98,8 +158,11 @@ void HierarchyPanel::drawEntityNode(core::UUID entity) {
             auto child = scene.createEntity("Entity");
             scene.setParent(child, entity_handle);
         }
+        if (ImGui::MenuItem("Duplicate Entity", "Ctrl+D")) {
+            requestDuplicate(entity);
+        }
         ImGui::Separator();
-        if (ImGui::MenuItem("Delete Entity")) {
+        if (ImGui::MenuItem("Delete Entity", "Del")) {
             delete_requested = true;
         }
         ImGui::EndPopup();
@@ -113,7 +176,7 @@ void HierarchyPanel::drawEntityNode(core::UUID entity) {
     }
 
     if (delete_requested) {
-        m_pending_delete = entity;
+        requestDelete(entity);
     }
 }
 

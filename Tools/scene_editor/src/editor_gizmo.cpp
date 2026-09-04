@@ -37,6 +37,13 @@ void EditorGizmo::handleShortcuts(bool enabled) {
         return;
     }
 
+    // 这三个是光秃秃的字母键，没有修饰键给它们兜底，所以文本框活跃时必须让路 ——
+    // 否则在 Inspector 里给实体改名，打一个 "w" 就顺手把手柄切成了 translate。
+    // 编辑器相机的 WASD 走 core::Input，和这里是两条路，不受影响。
+    if (ImGui::GetIO().WantTextInput) {
+        return;
+    }
+
     if (ImGui::IsKeyPressed(ImGuiKey_W, false) ) {
         m_operation = ImGuizmo::TRANSLATE;
     }

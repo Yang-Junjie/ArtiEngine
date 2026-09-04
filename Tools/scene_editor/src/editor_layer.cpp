@@ -166,6 +166,8 @@ void EditorLayer::onImGuiRender() {
 
     const bool gizmo_enabled = !m_context->isGameView();
     m_gizmo->handleShortcuts(gizmo_enabled);
+    // 在面板之前分派：Ctrl+D 置下的请求在 HierarchyPanel::draw() 开头就落地，同一帧生效。
+    handleShortcuts();
 
     drawMenuBar();
     drawToolbar();
@@ -287,16 +289,16 @@ void EditorLayer::drawMenuBar() {
             }
             ImGui::Separator();
             const bool project_open = m_context->isProjectOpen();
-            if (ImGui::MenuItem("New Scene", "Ctrl+N", false, project_open)) {
+            if (ImGui::MenuItem("New Scene", "Ctrl+N", false, canChangeScene())) {
                 m_document->createNew();
             }
-            if (ImGui::MenuItem("Open Scene...", "Ctrl+O", false, project_open)) {
+            if (ImGui::MenuItem("Open Scene...", "Ctrl+O", false, canChangeScene())) {
                 m_document->open();
             }
-            if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, project_open)) {
+            if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, canSaveScene())) {
                 m_document->save();
             }
-            if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S", false, project_open)) {
+            if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S", false, canSaveScene())) {
                 m_document->saveAs();
             }
             ImGui::Separator();
@@ -321,10 +323,105 @@ void EditorLayer::drawMenuBar() {
             }
             if (ImGui::MenuItem("Redo", "Ctrl+Y", false, false)) {
             }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, canDuplicateSelection())) {
+                duplicateSelection();
+            }
+            if (ImGui::MenuItem("Delete", "Del", false, canDeleteSelection())) {
+                deleteSelection();
+            }
             ImGui::EndMenu();
         }
         ImGui::EndMainMenuBar();
     }
+}
+
+bool EditorLayer::canDuplicateSelection() const {
+    // Play 下不给复制：那是「以游戏的方式看」，没有 gizmo、没有编辑操作。Simulate 下允许 ——
+    // 那儿本来就能选中、能拖 gizmo。代价见 Scene.md 3.1：模拟中新建的实体没有刚体，
+    // 而且 Stop 之后会跟着快照一起被丢掉。
+    return m_context != nullptr && m_context->isProjectOpen() && !m_context->isGameView() &&
+           m_context->selectedEntity().has_value();
+}
+
+void EditorLayer::duplicateSelection() {
+    if (!canDuplicateSelection()) {
+        return;
+    }
+    m_hierarchy_panel->requestDuplicate(*m_context->selectedEntity());
+}
+
+bool EditorLayer::canDeleteSelection() const {
+    // 和复制同一套前提。Simulate 下允许删：`PhysicsSystem` 已经处理了「写回时实体没了」
+    // （见 physics_system.cpp 里 moveEvents 那个循环），而且 Stop 之后场景从快照恢复，
+    // 模拟中删掉的实体会自己回来 —— 所以那不是破坏性操作。
+    return canDuplicateSelection();
+}
+
+void EditorLayer::deleteSelection() {
+    if (!canDeleteSelection()) {
+        return;
+    }
+    m_hierarchy_panel->requestDelete(*m_context->selectedEntity());
+}
+
+bool EditorLayer::canChangeScene() const {
+    // 模拟中也允许：新建和打开都从 SceneDocument::reset() 走，那里会无条件退到 Edit
+    // （快照属于旧场景），所以不需要在这儿再判一次。
+    return m_context != nullptr && m_document != nullptr && m_context->isProjectOpen();
+}
+
+bool EditorLayer::canSaveScene() const {
+    // **模拟中不许存。** Simulate / Play 期间物理一直在往场景里写 transform，而
+    // `World::saveScene()` 序列化的就是那个活场景 —— 存下去等于把盒子掉落后的姿态盖在
+    // 编辑好的场景上，而且没有 undo 能救。编辑期那一份原样躺在快照里，Stop 之后才回来。
+    //
+    // 这条限制**菜单项和快捷键都吃**：Ctrl+S 是肌肉记忆，一边看着模拟一边顺手按下去
+    // 恰恰是最容易发生的那种误操作，只拦菜单等于没拦。
+    return canChangeScene() && !m_context->isSimulating();
+}
+
+void EditorLayer::handleShortcuts() {
+    // 用 ImGui::Shortcut() 而不是 IsKeyChordPressed()：它带焦点路由，所以在 Inspector 的
+    // 名字输入框里打字不会误触发。RouteGlobal = 没有别的窗口 / 活动项抢走这个组合键时归我。
+    //
+    // Ctrl+S 和 Ctrl+Shift+S 不会撞车，判断顺序也无所谓：ImGui 要求修饰键**精确匹配**
+    // （IsKeyChordPressed 里 `g.IO.KeyMods != mods` 直接 return false），按着 Shift 时
+    // Ctrl+S 那条根本不成立。
+    //
+    // 每条都先过一遍和菜单项同一个前提判断 —— 不满足时连 Shortcut() 都不调，
+    // 也就不会去登记一条注定不干活的路由。
+    constexpr ImGuiInputFlags route = ImGuiInputFlags_RouteGlobal;
+
+    if (canChangeScene() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, route)) {
+        m_document->createNew();
+    }
+    if (canChangeScene() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, route)) {
+        m_document->open();
+    }
+    if (canSaveScene() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S, route)) {
+        m_document->saveAs();
+    }
+    if (canSaveScene() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, route)) {
+        m_document->save();
+    }
+    if (canDuplicateSelection() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D, route)) {
+        duplicateSelection();
+    }
+
+    // Delete 是**光秃秃的一个键**，没有修饰键给它兜底，而它干的事又是不可撤销的 ——
+    // 所以除了 Shortcut() 的焦点路由，再显式挡一道 WantTextInput：在 Inspector 里改名字、
+    // 想删掉一个打错的字符，绝不能变成删掉这个实体。
+    //
+    // 语义上它固定是「删掉选中的实体」，不随焦点面板变 —— 整个编辑器只有一份选中状态
+    //（`EditorContext::m_selected_entity`），Content Browser 那边根本没有删除操作。
+    if (canDeleteSelection() && !ImGui::GetIO().WantTextInput &&
+            ImGui::Shortcut(ImGuiKey_Delete, route)) {
+        deleteSelection();
+    }
+
+    // Ctrl+Z / Ctrl+Y **刻意不接**：没有 undo 栈，接上去只能是个什么都不做的键。
+    // 菜单里那两项也仍然是灰的 —— 灰着的菜单项说的是实话，能按下去却没反应的快捷键不是。
 }
 
 void EditorLayer::drawToolbar() {
