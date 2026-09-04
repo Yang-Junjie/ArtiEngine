@@ -1,0 +1,22 @@
+Version: 2
+Source:
+  Path: Scripts/wasd_move.lua
+  ContentHash: 0
+  Size: 2140
+Importer:
+  Name: artiengine.ScriptImporter
+  Version: 1
+Settings:
+  Authored:
+    {}
+  Inferred:
+    {}
+  ResolvedHash: 14695981039346656037
+Assets:
+  - LocalId: ""
+    Handle: 5c81970000000001
+    Type: artiengine.asset.script
+    ArtifactPath: Imported/5c81970000000001.artiscript
+    Properties:
+      byte_size: !arti/uint 2140
+    Dependencies: []

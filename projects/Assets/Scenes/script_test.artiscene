@@ -1,0 +1,117 @@
+Entities:
+  - EntityComponents:
+      arti.id: 000000000000b001
+      arti.parent: ~
+      arti.tag: Environment
+      arti.transform:
+        Translation: [0, 0, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.environment:
+        EquirectTexture: 898b72c7c0394447
+        SkyColor: [0.03, 0.03, 0.035]
+        Intensity: 1
+        Enabled: true
+        SkyVisible: true
+  - EntityComponents:
+      arti.id: 000000000000b002
+      arti.parent: ~
+      arti.tag: Directional Light
+      arti.transform:
+        Translation: [0, 4, 0]
+        Rotation: [0.87542605, -0.4082179, -0.23456971, -0.10938165]
+        Scale: [1, 1, 1]
+      artiengine.directional_light:
+        Color: [1, 1, 1]
+        Intensity: 1
+        Enabled: true
+        CastsShadow: true
+        ShadowDistance: 50
+  - EntityComponents:
+      arti.id: 000000000000b003
+      arti.parent: ~
+      arti.tag: Main Camera
+      arti.transform:
+        Translation: [0, 6, 10]
+        Rotation: [0.96592583, -0.25881905, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.camera:
+        FovDegrees: 60
+        NearPlane: 0.1
+        FarPlane: 100
+        Primary: true
+  # 地面拆成两个实体：缩放过的立方体做视觉，不缩放的空实体做碰撞体。
+  # 物理只作用于「没有父级、缩放是 1」的实体，而碰撞体尺寸是显式写在组件里的 —— 见 Scene.md 3.1。
+  - EntityComponents:
+      arti.id: 000000000000b004
+      arti.parent: ~
+      arti.tag: Ground Visual (scaled, physics skips it)
+      arti.transform:
+        Translation: [0, -0.25, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [24, 0.5, 24]
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
+  - EntityComponents:
+      arti.id: 000000000000b005
+      arti.parent: ~
+      arti.tag: Ground Body
+      arti.transform:
+        Translation: [0, -0.25, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.rigid_body:
+        Type: Static
+        GravityScale: 1
+        EnableSleep: true
+      artiengine.collider:
+        Shape: Box
+        HalfExtents: [12, 0.25, 12]
+        Radius: 0.5
+        HalfHeight: 0.5
+        Density: 1
+        Friction: 0.3
+        Restitution: 0
+  # 这个就是被脚本推的那个。它有碰撞体，所以脚下的射线能打中地面。
+  # 刻意是 Kinematic：脚本自己写 transform，不希望重力再把它拽下去。
+  - EntityComponents:
+      arti.id: 000000000000b006
+      arti.parent: ~
+      arti.tag: Scripted Cube
+      arti.transform:
+        Translation: [0, 0.5, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
+      artiengine.rigid_body:
+        Type: Kinematic
+        GravityScale: 1
+        EnableSleep: false
+      artiengine.collider:
+        Shape: Box
+        HalfExtents: [0.5, 0.5, 0.5]
+        Radius: 0.5
+        HalfHeight: 0.5
+        Density: 1
+        Friction: 0.3
+        Restitution: 0
+      artiengine.script:
+        Script: 5c81970000000001
+  # 一个静止的参照物，这样「方块真的动了」一眼看得出来。
+  - EntityComponents:
+      arti.id: 000000000000b007
+      arti.parent: ~
+      arti.tag: Reference Sphere
+      arti.transform:
+        Translation: [3, 0.5, -2]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000003
+        Materials: [b0117e1000000002]
+        Visible: true
