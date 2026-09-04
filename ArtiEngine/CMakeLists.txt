@@ -115,6 +115,24 @@ if(BUILD_TESTING)
     set_target_properties(lua_vm_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
     add_test(NAME lua_vm_smoke COMMAND lua_vm_smoke)
     artichoco_stage_msvc_runtime(lua_vm_smoke)
+
+    add_executable(physics_raycast_smoke runtime/tests/physics_raycast_smoke.cpp)
+    target_compile_features(physics_raycast_smoke PRIVATE cxx_std_20)
+    target_link_libraries(physics_raycast_smoke PRIVATE ArtiEngine::Runtime)
+    set_target_properties(physics_raycast_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
+    add_test(NAME physics_raycast_smoke COMMAND physics_raycast_smoke)
+    artichoco_stage_msvc_runtime(physics_raycast_smoke)
+
+    # transform 所有权：Dynamic 归物理，Static / Kinematic 归场景。这条错了不会崩，
+    # 症状是「按住键物体先卡一下才动」—— 从现象反推很远，所以钉在这里。
+    add_executable(physics_transform_ownership_smoke
+        runtime/tests/physics_transform_ownership_smoke.cpp)
+    target_compile_features(physics_transform_ownership_smoke PRIVATE cxx_std_20)
+    target_link_libraries(physics_transform_ownership_smoke PRIVATE ArtiEngine::Runtime)
+    set_target_properties(physics_transform_ownership_smoke PROPERTIES
+        FOLDER "Tests/ArtiEngine")
+    add_test(NAME physics_transform_ownership_smoke COMMAND physics_transform_ownership_smoke)
+    artichoco_stage_msvc_runtime(physics_transform_ownership_smoke)
 endif()
 
 # ImGui 宿主单独一个 target：它要链 SDL 和 imgui 的 SDL3 后端，不该让核心库的下游都背上。
