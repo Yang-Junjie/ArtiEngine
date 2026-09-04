@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 进行中 |
+| **状态** | 基本完成（WASD 里程碑已达成；剩三条编辑器里的人工验收）|
 | **创建** | 2026-09-04 |
 | **最后更新** | 2026-09-04 |
 | **涉及仓库** | **只有 ArtiEngine。** 不动 ArtiRenderer / ArtiChoco。新 submodule 两个，都 pin tag：`third_party/lua`、`third_party/sol2` |
@@ -15,10 +15,16 @@
 
 > **全文唯一允许改动的段落。每次收工前更新这里。**
 
-**当前进度：阶段 0 ~ 6 的代码、测试、文档全部落地，`ctest` 14/14 全绿。只差编辑器里的人工验收。**
+**当前进度：里程碑达成 —— WASD 在播放器里真的能推动方块（用户 2026-09-04 实测，四个键都对）。**
 
-下一步：**在编辑器里走一遍端到端验收第 5 / 6 / 8 条**（Play 里 WASD 能不能推动方块、脚本写错
-编辑器是否还能点 Stop、Simulate 下是否也跑）。代码侧没有已知的待办。
+`ctest` 15/15 全绿，代码 / 文档 / 示例全部落地并已 push（六条提交，`774f52a`..`0f3a60b`）。
+
+**任务目标那一行「第一个可玩的里程碑：WASD 推动一个实体 + 一发射线打中地面」已经兑现。**
+
+剩下三条**编辑器里**的人工验收，都不影响这条主干成立，所以状态先记「基本完成」：
+- 编辑器里加 Script 组件 + 填 UUID + Play → Stop 实体回原位（快照那条免费性质）
+- 脚本写错时编辑器 UI 还能点 Stop（逻辑那一半 `script_runtime_smoke` 已经盖住，验 UI）
+- Simulate 下也跑（和物理一样，两条轴独立）
 
 已经**自动化验证过**的（不需要再人工确认）：
 - 脚本能改场景、抛错后被禁用 —— `script_runtime_smoke`，端到端走完整条路（写 `.lua` →
@@ -358,7 +364,7 @@ function on_destroy(entity) end
 
 ### 阶段 6 · 示例、文档、收尾
 
-- [~] **6.1 示例脚本** ← 进行中：**脚本和场景都写好了，播放器里跑通了；WASD 要人按一下**
+- [x] **6.1 示例脚本**
   - 文件：`projects/Assets/Scripts/wasd_move.lua`
   - 做法：WASD 平移（Shift 加速）、从实体位置沿 `-Y` 打一枪、命中就 `arti.log.info` 一次（不要每帧）。场景里给某个 Cube 挂上它——**不要默默改 `physics_test.artiscene` 里用户未提交的那份**；改 `1.artiscene` 或新建 `script_test.artiscene`
   - 验收：编辑器 Play：WASD 能动；射线在有地面时打出一条 log
@@ -368,7 +374,8 @@ function on_destroy(entity) end
     被推的方块是 Kinematic（脚本自己写 transform，不想让重力再拽它）。
   - **播放器里验过**（读日志，不是人工点）：`wasd_move attached to Scripted Cube` +
     `standing over 000000000000b005 at y=0.00`，没有 error。
-  - **还差**：WASD 的按键要人在窗口里按。射线那条已经证明了绑定是通的。
+  - **WASD 四个键用户 2026-09-04 都按过了，没问题。** 至此 `arti.input.is_key_pressed` 的键名映射
+    这一环也确认了 —— 它是唯一没法自动化的那一环（要真的窗口焦点 + 真的按键事件）。
 
 - [x] **6.2 架构文档**
   - `Assets.md`：五种资产、importer/loader 表
@@ -392,13 +399,12 @@ function on_destroy(entity) end
 4. `script_runtime_smoke` 反向验证过：去掉 disabled，boom 脚本第二次 tick 还会改 transform。
    **已过**（实测 x=3 而不是 1）。
 5. 编辑器：给实体加 Script、填 wasd 脚本 UUID、Play 能 WASD 动、Stop 实体回到原位（Lua 写的
-   transform 不落在编辑场景上 —— 这是快照免费给的）。**还没做，要人在 GUI 上点。**
-6. 脚本里写 `error("x")`，编辑器不崩，Stop 还能按。**还没做**（逻辑那一半由
-   `script_runtime_smoke` 的 boom 用例覆盖了，人工要确认的是编辑器 UI 还能操作）。
-7. `arti_player` 跑挂了该脚本的场景。**已过**（除了按键本身）—— 起来了、脚本加载了、`on_create`
-   和射线都跑了、没有 error。**「脚本推动实体」这条也在播放器里实测过了**：用一个临时的自动
-   前进探针脚本（不需要按键），日志里每 30 帧稳定 +1.0（2.0 单位/秒 × 0.5 秒），线性累加、
-   没有卡顿。探针文件和它的 artifact 验完都删了。**只剩「按 W 键这个输入本身通不通」要人试。**
+   transform 不落在编辑场景上 —— 这是快照免费给的）。**WASD 已过**（用户 2026-09-04 在窗口里
+   按过，四个键都对）。「加组件 + 填 UUID + Stop 回原位」这条编辑器路径还没单独走。
+6. 脚本里写 `error("x")`，编辑器不崩，Stop 还能按。**逻辑那一半已过**（`script_runtime_smoke`
+   的 boom 用例 + 反向验证），编辑器 UI 那一半还没人工确认。
+7. `arti_player` 跑挂了该脚本的场景。**已过。** 起来了、脚本加载了、`on_create` 和射线都跑了、
+   没有 error；WASD 四个键实测能推动方块。
 8. Simulate 下脚本也跑（和物理一样，两条轴独立）。**还没做，要人在 GUI 上点。**
 
 **不在验收范围内**：热改 `.lua` 不重导就生效；脚本里生成带 Collider 的子弹（prefab 带不了这些）。
