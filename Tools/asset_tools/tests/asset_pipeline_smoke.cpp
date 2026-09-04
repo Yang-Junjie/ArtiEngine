@@ -6,6 +6,7 @@
 #include "asset/builtin_assets.h"
 #include "asset/material_asset.h"
 #include "asset/prefab_asset.h"
+#include "asset/script_asset.h"
 #include "asset/texture_asset.h"
 
 #include <algorithm>
@@ -753,6 +754,41 @@ int run() {
         // 目标已存在时必须拒绝，不能静默覆盖用户文件。
         const auto again = pipeline.extractMaterial(derived, "Model/helmet_mat.artimaterial");
         if (!require(!again.succeeded, "extract must refuse to overwrite an existing file")) {
+            return 1;
+        }
+    }
+
+    // 脚本是第五种资产：源和 artifact 逐字节相同，load 出来就是那份文本。
+    {
+        constexpr std::string_view kSource = "-- hi from the pipeline smoke\n";
+        if (!require(std::filesystem::create_directories(assets / "Scripts"),
+                    "failed to create Scripts/") ||
+                !require(writeText(assets / "Scripts" / "hello.lua", kSource),
+                        "failed to write the lua fixture")) {
+            return 1;
+        }
+        if (!require(pipeline.canImport("Scripts/hello.lua"),
+                    ".lua was not claimed by ScriptImporter")) {
+            return 1;
+        }
+        const auto imported = pipeline.reconcile();
+        if (!require(imported.succeeded() && imported.imported == 1,
+                    "reconcile did not import the lua script")) {
+            return 1;
+        }
+        const auto source = pipeline.sourceAssets("Scripts/hello.lua");
+        if (!require(source.state == arti::tools::asset::SourceState::Imported &&
+                            source.assets.size() == 1,
+                    "the lua source did not produce exactly one asset") ||
+                !require(source.assets.front().type ==
+                                std::string{ arti::engine::asset::kScriptAssetType },
+                        "the lua asset is not artiengine.asset.script")) {
+            return 1;
+        }
+        const auto loaded = pipeline.manager().load<arti::engine::asset::ScriptAsset>(
+                source.assets.front().handle);
+        if (!require(loaded && loaded->source() == kSource,
+                    "loaded script source is not byte-identical to the .lua file")) {
             return 1;
         }
     }

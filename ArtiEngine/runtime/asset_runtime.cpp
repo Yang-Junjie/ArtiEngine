@@ -4,6 +4,7 @@
 #include "asset/loaders/material_loader.h"
 #include "asset/loaders/mesh_loader.h"
 #include "asset/loaders/prefab_loader.h"
+#include "asset/loaders/script_loader.h"
 #include "asset/loaders/texture_loader.h"
 #include "engine_log.h"
 
@@ -47,7 +48,8 @@ bool AssetRuntime::finishOpen(std::unique_ptr<arti::asset::AssetManager> manager
             manager->registerLoader(std::make_unique<asset::MeshLoader>()) &&
             manager->registerLoader(std::make_unique<asset::MaterialLoader>()) &&
             manager->registerLoader(std::make_unique<asset::TextureLoader>()) &&
-            manager->registerLoader(std::make_unique<asset::PrefabLoader>());
+            manager->registerLoader(std::make_unique<asset::PrefabLoader>()) &&
+            manager->registerLoader(std::make_unique<asset::ScriptLoader>());
     if (!loaders_registered) {
         getLogChannel().error("Failed to register the engine asset loaders");
         return false;

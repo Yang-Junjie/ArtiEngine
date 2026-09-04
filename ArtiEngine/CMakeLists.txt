@@ -7,10 +7,12 @@ add_library(artiengine STATIC
     asset/importers/detail/gltf_parser.cpp
     asset/importers/gltf_importer.cpp
     asset/importers/material_importer.cpp
+    asset/importers/script_importer.cpp
     asset/importers/texture_importer.cpp
     asset/loaders/material_loader.cpp
     asset/loaders/mesh_loader.cpp
     asset/loaders/prefab_loader.cpp
+    asset/loaders/script_loader.cpp
     asset/loaders/texture_loader.cpp
     asset/material_asset.cpp
     asset/mesh_asset.cpp

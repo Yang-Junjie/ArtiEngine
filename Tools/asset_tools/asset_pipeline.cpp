@@ -2,6 +2,7 @@
 
 #include "asset/importers/gltf_importer.h"
 #include "asset/importers/material_importer.h"
+#include "asset/importers/script_importer.h"
 #include "asset/importers/texture_importer.h"
 
 #include "asset/material_asset.h"
@@ -36,7 +37,8 @@ bool AssetPipeline::open(const std::filesystem::path& assets_root,
     const bool importers_registered =
             runtime_manager.registerImporter(std::make_unique<engine::asset::GltfImporter>()) &&
             runtime_manager.registerImporter(std::make_unique<engine::asset::TextureImporter>()) &&
-            runtime_manager.registerImporter(std::make_unique<engine::asset::MaterialImporter>());
+            runtime_manager.registerImporter(std::make_unique<engine::asset::MaterialImporter>()) &&
+            runtime_manager.registerImporter(std::make_unique<engine::asset::ScriptImporter>());
     if (!importers_registered) {
         close();
         return false;
