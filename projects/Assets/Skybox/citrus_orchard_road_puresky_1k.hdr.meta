@@ -1,0 +1,26 @@
+Version: 2
+Source:
+  Path: Skybox/citrus_orchard_road_puresky_1k.hdr
+  ContentHash: 0
+  Size: 1317344
+Importer:
+  Name: artiengine.TextureImporter
+  Version: 1
+Settings:
+  Authored:
+    {}
+  Inferred:
+    {}
+  ResolvedHash: 5240228856541172191
+Assets:
+  - LocalId: ""
+    Handle: 6741f65d20b61f60
+    Type: artiengine.asset.texture
+    ArtifactPath: Imported/6741f65d20b61f60.artitexture
+    Properties:
+      width: !arti/uint 1024
+      data_size: !arti/uint 4194304
+      height: !arti/uint 512
+      format: !arti/string RGBA16Float
+      generate_mipmaps: !arti/bool true
+    Dependencies: []

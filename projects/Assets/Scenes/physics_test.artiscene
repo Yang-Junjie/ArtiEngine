@@ -1,5 +1,143 @@
 Entities:
   - EntityComponents:
+      arti.id: 000000000000a001
+      arti.parent: ~
+      arti.tag: Ground Body
+      arti.transform:
+        Translation: [0, -1.866, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.collider:
+        Shape: Box
+        HalfExtents: [8, 0.5, 8]
+        Radius: 0.5
+        HalfHeight: 0.5
+        Density: 1
+        Friction: 0.3
+        Restitution: 0
+      artiengine.rigid_body:
+        Type: Static
+        GravityScale: 1
+        EnableSleep: true
+  - EntityComponents:
+      arti.id: 000000000000a003
+      arti.parent: ~
+      arti.tag: Box B
+      arti.transform:
+        Translation: [0, 1.5, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.collider:
+        Shape: Box
+        HalfExtents: [0.5, 0.5, 0.5]
+        Radius: 0.5
+        HalfHeight: 0.5
+        Density: 1
+        Friction: 0.3
+        Restitution: 0
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
+      artiengine.rigid_body:
+        Type: Dynamic
+        GravityScale: 1
+        EnableSleep: true
+  - EntityComponents:
+      arti.id: 000000000000a004
+      arti.parent: ~
+      arti.tag: Box C
+      arti.transform:
+        Translation: [0, 3, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.collider:
+        Shape: Box
+        HalfExtents: [0.5, 0.5, 0.5]
+        Radius: 0.5
+        HalfHeight: 0.5
+        Density: 1
+        Friction: 0.3
+        Restitution: 0
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
+      artiengine.rigid_body:
+        Type: Dynamic
+        GravityScale: 1
+        EnableSleep: true
+  - EntityComponents:
+      arti.id: 000000000000a005
+      arti.parent: ~
+      arti.tag: Collider Only (physics must skip it)
+      arti.transform:
+        Translation: [2.5, 0, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.collider:
+        Shape: Sphere
+        HalfExtents: [0.5, 0.5, 0.5]
+        Radius: 0.5
+        HalfHeight: 0.5
+        Density: 1
+        Friction: 0.3
+        Restitution: 0
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000003
+        Materials: [b0117e1000000002]
+        Visible: true
+  - EntityComponents:
+      arti.id: 1fbc97d210411263
+      arti.parent: ~
+      arti.tag: Box B (2)
+      arti.transform:
+        Translation: [1.3941698, 0.044797987, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.collider:
+        Shape: Box
+        HalfExtents: [0.5, 0.5, 0.5]
+        Radius: 0.5
+        HalfHeight: 0.5
+        Density: 1
+        Friction: 0.3
+        Restitution: 0
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
+      artiengine.rigid_body:
+        Type: Dynamic
+        GravityScale: 1
+        EnableSleep: true
+  - EntityComponents:
+      arti.id: 27b07a48f99effca
+      arti.parent: ~
+      arti.tag: Box B (3)
+      arti.transform:
+        Translation: [-1.5249743, 0.044797987, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.collider:
+        Shape: Box
+        HalfExtents: [0.5, 0.5, 0.5]
+        Radius: 0.5
+        HalfHeight: 0.5
+        Density: 1
+        Friction: 0.3
+        Restitution: 0
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
+      artiengine.rigid_body:
+        Type: Dynamic
+        GravityScale: 1
+        EnableSleep: true
+      artiengine.script:
+        Script: 5c81970000000001
+  - EntityComponents:
       arti.id: 4673682bd198f4b7
       arti.parent: ~
       arti.tag: Environment
@@ -8,23 +146,19 @@ Entities:
         Rotation: [1, 0, 0, 0]
         Scale: [1, 1, 1]
       artiengine.environment:
-        EquirectTexture: 898b72c7c0394447
+        EquirectTexture: 6741f65d20b61f60
         SkyColor: [0.03, 0.03, 0.035]
-        Intensity: 1
+        Intensity: 0.45
         Enabled: true
         SkyVisible: true
   - EntityComponents:
-      arti.id: d4da1dd993484c98
+      arti.id: 6d22eb36edc4fba5
       arti.parent: ~
-      arti.tag: Directional Light
+      arti.tag: DamagedHelmet
       arti.transform:
-        Translation: [0, 0, 0]
-        Rotation: [0.87542605, -0.4082179, -0.23456971, -0.10938165]
+        Translation: [-3.2528808, 0, 0]
+        Rotation: [1, 0, 0, 0]
         Scale: [1, 1, 1]
-      artiengine.directional_light:
-        Color: [1, 1, 1]
-        Intensity: 1
-        Enabled: true
   - EntityComponents:
       arti.id: 95477a25f6a2c7cc
       arti.parent: ~
@@ -46,14 +180,6 @@ Entities:
         Translation: [-1.6, -1.4055932, 0]
         Rotation: [1, 0, 0, 0]
         Scale: [17.095903, 0.078158334, 30.88518]
-      artiengine.mesh_renderer:
-        Mesh: b0117e1000000001
-        Materials: [b0117e1000000002]
-        Visible: true
-      artiengine.rigid_body:
-        Type: Static
-        GravityScale: 1
-        EnableSleep: true
       artiengine.collider:
         Shape: Box
         HalfExtents: [8, 0.04, 15]
@@ -62,126 +188,28 @@ Entities:
         Density: 1
         Friction: 0.3
         Restitution: 0
-  - EntityComponents:
-      arti.id: 000000000000a001
-      arti.parent: ~
-      arti.tag: Ground Body
-      arti.transform:
-        Translation: [0, -1.8660001, 0]
-        Rotation: [1, 0, 0, 0]
-        Scale: [1, 1, 1]
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
       artiengine.rigid_body:
         Type: Static
         GravityScale: 1
         EnableSleep: true
-      artiengine.collider:
-        Shape: Box
-        HalfExtents: [8, 0.5, 8]
-        Radius: 0.5
-        HalfHeight: 0.5
-        Density: 1
-        Friction: 0.3
-        Restitution: 0
   - EntityComponents:
-      arti.id: 000000000000a002
+      arti.id: d4da1dd993484c98
       arti.parent: ~
-      arti.tag: Box A
+      arti.tag: Directional Light
       arti.transform:
         Translation: [0, 0, 0]
-        Rotation: [1, 0, 0, 0]
+        Rotation: [0.87542605, -0.4082179, -0.23456971, -0.10938165]
         Scale: [1, 1, 1]
-      artiengine.mesh_renderer:
-        Mesh: b0117e1000000001
-        Materials: [b0117e1000000002]
-        Visible: true
-      artiengine.rigid_body:
-        Type: Dynamic
-        GravityScale: 1
-        EnableSleep: true
-      artiengine.collider:
-        Shape: Box
-        HalfExtents: [0.5, 0.5, 0.5]
-        Radius: 0.5
-        HalfHeight: 0.5
-        Density: 1
-        Friction: 0.3
-        Restitution: 0
-  - EntityComponents:
-      arti.id: 000000000000a003
-      arti.parent: ~
-      arti.tag: Box B
-      arti.transform:
-        Translation: [0, 1.5, 0]
-        Rotation: [1, 0, 0, 0]
-        Scale: [1, 1, 1]
-      artiengine.mesh_renderer:
-        Mesh: b0117e1000000001
-        Materials: [b0117e1000000002]
-        Visible: true
-      artiengine.rigid_body:
-        Type: Dynamic
-        GravityScale: 1
-        EnableSleep: true
-      artiengine.collider:
-        Shape: Box
-        HalfExtents: [0.5, 0.5, 0.5]
-        Radius: 0.5
-        HalfHeight: 0.5
-        Density: 1
-        Friction: 0.3
-        Restitution: 0
-  - EntityComponents:
-      arti.id: 000000000000a004
-      arti.parent: ~
-      arti.tag: Box C
-      arti.transform:
-        Translation: [0, 3, 0]
-        Rotation: [1, 0, 0, 0]
-        Scale: [1, 1, 1]
-      artiengine.mesh_renderer:
-        Mesh: b0117e1000000001
-        Materials: [b0117e1000000002]
-        Visible: true
-      artiengine.rigid_body:
-        Type: Dynamic
-        GravityScale: 1
-        EnableSleep: true
-      artiengine.collider:
-        Shape: Box
-        HalfExtents: [0.5, 0.5, 0.5]
-        Radius: 0.5
-        HalfHeight: 0.5
-        Density: 1
-        Friction: 0.3
-        Restitution: 0
-  - EntityComponents:
-      arti.id: 000000000000a005
-      arti.parent: ~
-      arti.tag: Collider Only (physics must skip it)
-      arti.transform:
-        Translation: [2.5, 0, 0]
-        Rotation: [1, 0, 0, 0]
-        Scale: [1, 1, 1]
-      artiengine.mesh_renderer:
-        Mesh: b0117e1000000003
-        Materials: [b0117e1000000002]
-        Visible: true
-      artiengine.collider:
-        Shape: Sphere
-        HalfExtents: [0.5, 0.5, 0.5]
-        Radius: 0.5
-        HalfHeight: 0.5
-        Density: 1
-        Friction: 0.3
-        Restitution: 0
-  - EntityComponents:
-      arti.id: 6d22eb36edc4fba5
-      arti.parent: ~
-      arti.tag: DamagedHelmet
-      arti.transform:
-        Translation: [-3.2528808, 0, 0]
-        Rotation: [1, 0, 0, 0]
-        Scale: [1, 1, 1]
+      artiengine.directional_light:
+        Color: [1, 1, 1]
+        Intensity: 10.8
+        Enabled: true
+        CastsShadow: true
+        ShadowDistance: 100
   - EntityComponents:
       arti.id: f20e6e5a87382920
       arti.parent: 6d22eb36edc4fba5
@@ -190,14 +218,6 @@ Entities:
         Translation: [0, 0, 0]
         Rotation: [0.7071067, 0.7071068, 0, 0]
         Scale: [1, 1, 1]
-      artiengine.mesh_renderer:
-        Mesh: ef5589e01a7ccc3c
-        Materials: [b94ed5f1ba5cf9bb]
-        Visible: true
-      artiengine.rigid_body:
-        Type: Dynamic
-        GravityScale: 1
-        EnableSleep: true
       artiengine.collider:
         Shape: Box
         HalfExtents: [0.5, 0.5, 0.5]
@@ -206,3 +226,35 @@ Entities:
         Density: 1
         Friction: 0.3
         Restitution: 0
+      artiengine.mesh_renderer:
+        Mesh: ef5589e01a7ccc3c
+        Materials: [b94ed5f1ba5cf9bb]
+        Visible: true
+      artiengine.rigid_body:
+        Type: Dynamic
+        GravityScale: 1
+        EnableSleep: true
+  - EntityComponents:
+      arti.id: f634110ec564d12b
+      arti.parent: ~
+      arti.tag: Box B (1)
+      arti.transform:
+        Translation: [0, 0.044797987, 0]
+        Rotation: [1, 0, 0, 0]
+        Scale: [1, 1, 1]
+      artiengine.collider:
+        Shape: Box
+        HalfExtents: [0.5, 0.5, 0.5]
+        Radius: 0.5
+        HalfHeight: 0.5
+        Density: 1
+        Friction: 0.3
+        Restitution: 0
+      artiengine.mesh_renderer:
+        Mesh: b0117e1000000001
+        Materials: [b0117e1000000002]
+        Visible: true
+      artiengine.rigid_body:
+        Type: Dynamic
+        GravityScale: 1
+        EnableSleep: true
