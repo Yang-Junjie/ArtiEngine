@@ -271,10 +271,10 @@ cmake --build --preset debug
 | 阴影的视锥剔除 | **已做**。判据是每级 cascade 的光空间 XY 重叠，**不是**相机视锥。Z 方向不另判：near/far 就是按 XY 重叠的投射体撑开的。详见 Rendering.md 第 9 节 |
 | 源内容变更检测 | `.meta` 的 `ContentHash` / `Size` / `Importer.Version` **只写不读**。目前只有 artifact 缺失才触发重导，改了源文件内容必须手动重导 |
 | 多线程的消费者 | **任务系统本身已经有了**（`arti::core::TaskSystem`，enkiTS 封装：fork-join、带句柄的异步任务、钉线程任务、`TaskGraph` 依赖图，文档见 `core/task/README.md`），但**一个真实消费者都还没接**。每个接入点的位置和它该调的 API 列在下面那张表里 |
-| 脚本的剩余部分 | **Lua 脚本已经有了**（`.lua` 是第五种资产、`ScriptComponent`、`ScriptSystem` 挂 `Update`，见 Scene.md 3.2）。还没有的：每实例属性表（脚本只能读别的组件，不能在 Inspector 里配参数）、`require` 跨脚本、协程、热重载（改了 `.lua` 要重导 + 重进 Play）、**prefab 带不了脚本**（`PrefabNode` 只有 mesh / materials） |
+| 脚本的剩余部分 | **Lua 脚本已经有了**（`.lua` 是第五种资产、`ScriptComponent`、`on_create` / `on_fixed_update` / `on_update` / `on_destroy`、`arti.physics.*` 能施力设速度和传送，见 Scene.md 3.2）。还没有的：每实例属性表（脚本只能读别的组件，不能在 Inspector 里配参数）、`require` 跨脚本、协程、热重载（改了 `.lua` 要重导 + 重进 Play）、**prefab 带不了脚本**（`PrefabNode` 只有 mesh / materials） |
 | 音频 | 完全没有。`LateUpdate` 还空着在跑 |
-| 物理的其余部分 | 刚体和**射线查询**已经有了（球 / 盒 / 胶囊、静态 / 运动学 / 动态、休眠、堆叠、`PhysicsSystem::raycast`）。还没有的：触发器（sensor）、关节、三角网格 / 高度场碰撞体、复合体（一个 body 多个 collider）、角色控制器、多线程（桥到任务系统，见 7.1）。Box3D 这些都有，随时能加 —— 现在脚本能消费它们了 |
-| Kinematic 体推不动 Dynamic 体 | Kinematic 的位置由场景驱动（脚本 / gizmo / 动画），物理每步用 `b3Body_SetTransform` 读进去 —— 那是**传送**，不产生推力。所以「电梯把箱子顶起来」「移动平台带着人走」现在不对（推不动或穿透）。出路是按两帧的位差算隐含速度、走 `b3Body_SetLinearVelocity`，那会连带引出「谁定义这个速度」的问题。所有权规则本身见 Scene.md 3.1.1 |
+| 物理的其余部分 | 刚体、**射线查询**、**刚体控制**（速度 / 力 / 冲量 / 传送）、**每固定步的 body 增删同步**都有了（球 / 盒 / 胶囊、静态 / 运动学 / 动态、休眠、堆叠）。还没有的：触发器（sensor）、关节、三角网格 / 高度场碰撞体、复合体（一个 body 多个 collider）、角色控制器、运行时改碰撞体尺寸 / 材质（**改类型**会重建 body，其余参数要重进 Play）、多线程（桥到任务系统，见 7.1）。Box3D 这些都有，随时能加 —— 现在脚本能消费它们了 |
+| 运动学体的两个边角 | **「电梯把箱子顶起来」「移动平台带着人走」已经能用了**：Kinematic 的位置仍由场景驱动，但物理把它当成下一个固定步的**目标**并求出速度（`b3Body_SetTargetTransform`），不再是传送。剩下两个边角：目标远到一步搬不过去时（线速 > 400 m/s 或每步转过 45°）退回传送，那一步不产生推力；开着休眠的运动学体被慢于 0.05 m/s 地推时会顿走（毫米级）。见 Scene.md 3.1.1 |
 | 带父级或有缩放的实体不参与模拟 | 物理在世界空间算而 `TransformComponent` 是局部的，带父级要拿父级的世界逆矩阵反算；碰撞体尺寸显式写在组件里、不跟 scale 走。两种情况都记一条 warn 并跳过，所以「一块大地面」要拆成缩放过的视觉体 + 不缩放的碰撞体两个实体 |
 | 渲染插值 | 物理按固定步长跑，画面按帧率画，所以快速运动会有细微抖动。接缝是现成的：`FixedTimestepAccumulator::alpha()`（当前余额占一个固定步的比例）还没人用 |
 | 前向管线 | 已整条移除，只有延迟一条路径。不留双路径是刻意的 |

@@ -227,13 +227,21 @@ Inspector 里几个 UUID 输入框每帧都会把缓存的文本写回组件，�
 ### 脚本能用什么
 
 Lua 脚本是资产（`.lua` → `.artiscript`），挂在实体的 `ScriptComponent` 上，在 Simulate / Play 里
-跑。机制、生命周期和那六条规矩在 [Scene.md](Scene.md#32-脚本update-唯一的消费者)，这里只列 API。
+跑。机制、生命周期和那八条规矩在 [Scene.md](Scene.md#32-脚本update-唯一的消费者)，这里只列 API。
 
 ```lua
-function on_create(entity) end          -- 三个都是可选的，缺哪个跳过哪个
-function on_update(entity, dt) end
+function on_create(entity) end                  -- 四个都是可选的，缺哪个跳过哪个
+function on_fixed_update(entity, fixed_dt) end  -- 每个固定步一次（一帧零到多次）
+function on_update(entity, dt) end              -- 每渲染帧一次
 function on_destroy(entity) end
 ```
+
+**两种时钟的分工是硬的**：`on_update` 采输入、算意图；`on_fixed_update` 动物理。反过来都是错的 ——
+`is_key_pressed` 搬进固定回调会漏帧或把同一次按键算好几遍（一帧里可能有零个固定步，也可能追帧
+追出好几个），而施力写在 `on_update` 里会让效果跟着帧率变快变慢。固定回调在物理解算**之前**
+派发，所以这一步施的力在同一个物理步里就生效。
+
+一个手误的脚本会被禁用，而且**两种回调一起停** —— 一个实例、一份禁用状态。
 
 `entity`：
 
@@ -255,12 +263,30 @@ entity.translation = t`。直接 `entity.translation.x = 1` 改的是那份临�
 | --- | --- |
 | `arti.input.is_key_pressed(name)` | `"A"`–`"Z"`、`"Space"`、`"Escape"`、`"Shift"`、`"Ctrl"`。认不出的名字返回 false 并 warn **一次**（按名字去重，不会每帧刷屏） |
 | `arti.physics.raycast(origin, translation)` | 命中返回 `{uuid, point, normal, fraction}`，否则 `nil`。**`translation` 是位移向量**，不是「方向 × 长度」的另一种写法 |
+| `arti.physics.get_linear_velocity(entity)` | `{x, y, z}`，没有刚体返回 `nil` |
+| `arti.physics.set_linear_velocity(entity, v)` | 只对 **Dynamic** 有效。成功返回 `true` |
+| `arti.physics.apply_force(entity, f)` | 施在质心（不产生扭矩），累积到本固定步的解算。只对 Dynamic |
+| `arti.physics.apply_impulse(entity, j)` | **立刻**改速度（力要乘一个步长才见效）。跳跃、爆炸用它。只对 Dynamic |
+| `arti.physics.teleport(entity, position)` | 物理位置和场景位置一起改、线 / 角速度清零。三种刚体类型都行 |
 | `arti.scene.find_by_tag(name)` | 找不到返回 `nil` |
 | `arti.scene.spawn_prefab(uuid_string)` | 按节点树生成实体，返回根；资产不存在 / 加载失败返回 `nil` |
 | `arti.log.info/warn/error(message)` | 走 `ArtiEngine` 日志通道 |
 
+五个物理接口都收 `entity`（不是 UUID 字符串），失败时**返回 `false` / `nil` 并按 (操作, 实体)
+去重报一次原因** —— 实体不在、缺 RigidBody / Collider、类型不是 Dynamic、被物理跳过了，四种的修法
+完全不同，而每帧刷一条等于没有日志。非有限的输入（NaN / inf）同样只是失败，不会变成 Box3D 的断言。
+
+**Kinematic 体不用这几个接口**：写 `entity.translation` 就是给它下一个固定步的目标，物理据此
+求速度，所以它能托起 / 推动 Dynamic 体。所有权规则见 [Scene.md](Scene.md#311-transform-归谁)。
+
+两份示例刻意各走一条路：`Scripts/wasd_move.lua`（写 transform，方块是 Kinematic）和
+`Scripts/physics_move.lua` + `platform_lift.lua`（走 `arti.physics.*`，玩家是真的 Dynamic 刚体，
+WASD / Shift / Space 跳 / R 复位，还能站上升降平台）。后者的场景是
+`Scenes/physics_move_test.artiscene`。
+
 **v1 刻意没有的**：每实例属性表（脚本自己读别的组件；要做得先想清楚反射、Inspector 怎么画、
-哪些键进快照）、加 / 删组件、改刚体参数、场景切换、`require` 跨脚本、协程。
+哪些键进快照）、加 / 删组件、改刚体参数（尺寸 / 材质 / 重力倍数）、触发器与碰撞回调、场景切换、
+`require` 跨脚本、协程。
 
 ## 3. arti_player
 

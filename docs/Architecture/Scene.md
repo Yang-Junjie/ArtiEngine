@@ -94,7 +94,7 @@ std::string captureScene() const;          // 场景 → 内存里的一段文�
 bool restoreScene(std::string_view text);  // 反过来。**失败时场景一点不变**，也不动时钟
 void clear();                // 清实体 + 归零时钟
 void tick(float dt);
-void resetClock();           // 进 Play 模式时调 —— 那是一次新会话的开始
+void resetClock();           // 进 Play 模式时调 —— 时钟归零 + 通知物理和脚本重开会话
 uint64_t frameIndex();
 ```
 
@@ -107,10 +107,18 @@ uint64_t frameIndex();
 `tick()` 的顺序：
 
 ```
-FixedTimestepAccumulator 按固定步长补齐 → runSystems(FixedUpdate) 若干次
-                                        → runSystems(Update)      一次
-                                        → runSystems(LateUpdate)  一次
+FixedTimestepAccumulator 按固定步长补齐，每个固定步三段：
+    PhysicsSystem::syncBodies()        body 生命周期 + 场景 → 物理
+    ScriptSystem::onFixedUpdate()      on_fixed_update
+    runSystems(FixedUpdate)            解算 + 物理 → 场景
+补齐完之后 → runSystems(Update)      一次
+           → runSystems(LateUpdate)  一次
 ```
+
+前两段是 `World::tick` **显式**调的，不走 `runSystems`。看着不对称，但那个顺序是承重的（每一段
+少了都有具体症状，见 3.1），把它写在唯一同时认识这两个系统的地方比藏在「注册顺序」这种约定里
+更难弄坏。两句都先过一遍 `isSystemEnabled` —— 绕开了 `runSystems`，不查的话
+`setSystemEnabled<PhysicsSystem>(false)` 会变成「不解算但照样建 body」这种半开状态。
 
 `World` 的头文件只前向声明 `Scene`，访问器定义在 `.cpp` 里 —— 不把 EnTT 拖给每个包含它的
 翻译单元。
@@ -123,44 +131,75 @@ Play 出来的效果」和「exe 跑出来的效果」会各自漂移，而两�
 ### 3.1 物理：`FixedUpdate` 唯一的消费者
 
 `ArtiEngine/physics/physics_system.h`。Box3D（`third_party/box3d`，submodule 跟 `main`）的封装，
-注册在 `World` 的构造函数里 —— **全工程只有这一处**，所以编辑器的 Play / Simulate 和独立 player
+注册在 `World` 的构造函数里 —— **全工程只有那一处**，所以编辑器的 Play / Simulate 和独立 player
 跑的是同一份，不会出现「编辑器里能掉、exe 里不动」。
 
 `b3*` 的类型一个都不出现在头文件里（pimpl），`artiengine_runtime` 对 `box3d` 是 PRIVATE 链接，
 所以下游看不见 box3d 的头。
 
-一个固定步长做三件事：
+一个固定步长的**三段顺序**（前两段由 `World::tick` 显式调，第三段是 `FixedUpdate` 阶段）：
 
 ```
-帧号不再单调递增？ → 拆掉旧的 b3World、按当前场景重建（一个物理实体 = 一个 body + 一个 shape）
-b3World_Step(fixedDeltaTime, 4 个子步)
-b3World_GetBodyEvents() → 按 userData 里的实体 UUID 找到实体，写回 TransformComponent
+1. PhysicsSystem::syncBodies()      建新 body / 拆掉不再合格的 / 把场景拥有的 transform 读进去
+2. ScriptSystem::onFixedUpdate()    on_fixed_update(entity, fixed_dt)
+3. runSystems(FixedUpdate)          syncBodies() 再来一遍 → b3World_Step → 写回 Dynamic 的 transform
 ```
+
+**三段的位置都是有理由的，顺序错了都有各自的症状**：
+
+| | 少了它会怎样 |
+| --- | --- |
+| 第 1 段在脚本之前 | 会话的**第一个**固定步里 `arti.physics.apply_force` 会因为「还没有 body」返回 false，那一步的输入掉在地上 |
+| 第 2 段在解算之前 | 脚本施的力晚一个固定步才生效（Box3D 的力累积到下一次 step 并在那之后清空） |
+| 第 3 段里再同步一次 | 脚本刚写进 `TransformComponent` 的运动学目标晚一步才进物理世界，表现成平台跟手不及 |
+
+两段 `syncBodies` 之间没有 step，所以第二次算出来的和第一次一样（幂等），区别只是把脚本这一步的
+改动带上了。`ScriptSystem` **不**注册成第二个 `FixedUpdate` 系统而是被显式调用，理由见 3.2。
 
 `FixedTimestepAccumulator` 的默认步长是 1/60，正是 Box3D 推荐的 `1/60 + 4 子步`（内部相当于
 240 Hz 求解），两边不用互相迁就。事件数组只在下一次 step 之前有效，所以当场消费完、不存指针。
 
-三条要记住的规矩：
+四条要记住的规矩：
 
 - **transform 的所有权按 body 类型分**（见下面 3.1.1）。`Dynamic` 归物理：写回只动 translation
   和 rotation、**不动 scale**，所以在 Simulate 里拖 gizmo 推不动一个正在下落的盒子 —— 那是有意的。
   `Static` / `Kinematic` 归场景：物理每步**读**它们，不写回。Stop 之后场景从快照恢复，
   编辑期的值一点没丢。
-- **只作用于没有父级、且缩放是 1 的实体。** 另外两种情况建世界时各记一条 warn 并跳过（建一次打
-  一次，不是每帧）。物理在世界空间算而 `TransformComponent` 是局部的，带父级要拿父级的世界逆
-  矩阵反算，那是另一件事。
-- **重建世界的信号是帧号回退**，不是某个显式回调。`resetClock()`（`enterMode()` 和 `loadScene()`
-  都会调）把 `frameIndex` 归零，物理看到帧号不再单调递增就重建。比较单调性而不是判 `== 0`，
-  是因为 `FixedUpdate` 一帧里可能被调多次（追帧）。这是个将就：更干净的做法是给 `SceneSystem`
-  加一个 `onSimulationStart()`，但那要改 ArtiChoco。**这个信号哪天变脆，就该去加那个虚函数，
-  不要在这儿叠补丁。**
+- **body 的增删每个固定步同步一次**（`uuid → body` 一张表）。运行中新挂上 RigidBody + Collider
+  的实体当步就参与模拟；实体删了、组件摘了、挂上父级、缩放改了，对应的 body 当步 `b3DestroyBody`。
+  同一个 UUID 删了又建（EnTT 句柄的版本位变了）算**另一个**实体，不复用旧身份；刚体类型改了会重建。
+  其余参数（重力倍数、碰撞体尺寸、材质）的运行时热改仍然不在范围内。
+- **只作用于没有父级、且缩放是 1 的实体。** 另外两种情况（外加 transform 里出现 NaN / inf）
+  各记一条 warn 并跳过。因为同步现在每步都跑，warn 按 (实体, 原因) 去重 —— 原因变了才会再报一次。
+  物理在世界空间算而 `TransformComponent` 是局部的，带父级要拿父级的世界逆矩阵反算，那是另一件事。
+- **新会话的信号是 `requestSessionReset()`，帧号回退只是兜底。** `World::resetClock()`
+  （`enterMode()` 和 `loadScene()` 都会调）显式通知物理和脚本，下一次同步 / 派发之前拆掉重建。
+  **光比帧号大小不够**：只跑了一帧就 Stop / Play 的话两次 `frameIndex` 都是 0，`0 < 0` 不成立，
+  旧的物理世界会被当成还在用的。帧号回退的那条判断留着，给不经过 `World` 直接驱动 `Scene` 的
+  调用方用。
 
-单线程（`workerCount` 默认 1），没接 Box3D 的任务系统。**射线查询有了**（`raycast(origin,
-translation)`，返回最近命中的实体 UUID + 点 + 法线 + fraction，头里不出现 `b3*`），脚本
-`arti.physics.raycast` 就是它。还没有的：触发器、关节、三角网格 / 高度场碰撞体、复合体。
+单线程（`workerCount` 默认 1），没接 Box3D 的任务系统。**射线查询**（`raycast(origin,
+translation)`，返回最近命中的实体 UUID + 点 + 法线 + fraction）和**刚体控制**都有了，头里不出现
+`b3*`：
+
+```cpp
+std::optional<glm::vec3> linearVelocity(core::UUID entity) const;
+bool setLinearVelocity(core::UUID entity, const glm::vec3& velocity);
+bool applyForce(core::UUID entity, const glm::vec3& force);      // 施在质心，不产生扭矩
+bool applyImpulse(core::UUID entity, const glm::vec3& impulse);  // 立刻改速度
+bool teleport(scene::Scene&, core::UUID entity, const glm::vec3& position);
+```
+
+速度 / 力 / 冲量**只对 Dynamic 有意义**，其余类型返回 false 而不是悄悄不生效 —— Kinematic 要动
+就写 `TransformComponent`。`teleport` 三种类型都行：它同时改物理位置和场景位置，并清零线 / 角速度，
+所以一次复位不会被求解器当成「一帧走了十米」。没有 body、非有限的输入，一律返回失败 ——
+调用方是用户写的 Lua，一个手误不该变成 Box3D 的 `B3_ASSERT`。
 
 `raycast` 只打得中**进了模拟的**实体：被跳过的（带父级、缩放过、缺组件）在物理世界里没有 body，
 所以射线穿过去。没有物理世界（还没进过 Simulate）时返回 `nullopt`，不是崩。
+
+还没有的：触发器（sensor）、关节、三角网格 / 高度场碰撞体、复合体、角色控制器、渲染插值、
+多线程。
 
 #### 3.1.1 transform 归谁
 
@@ -170,69 +209,114 @@ Static / Kinematic 场景拥有。每个固定步**之前**从 TransformComponen
 ```
 
 **为什么需要这条规则**：脚本、gizmo、将来的动画系统都会写 `TransformComponent`，而 body 的位置
-原本只在 `buildWorld()` 时读过一次。没有「场景 → 物理」这个方向的同步，脚本每帧写一点、物理每帧
+原本只在建它的那一刻读过一次。没有「场景 → 物理」这个方向的同步，脚本每帧写一点、物理每帧
 把它盖回 body 的老位置，两边打架。症状是**「按住键，物体先卡一下才动」**—— 卡多久取决于那个
 body 还要几帧才停止出现在 `moveEvents` 里（一停止上报，物理就不再盖，脚本才开始生效）。
 这个坑在示例场景 `script_test.artiscene` 上真的踩到过。
 
-两半各管一件事，**不是等价的**：
+两半各管一件事：
 
 | | 防的是什么 |
 | --- | --- |
-| step 之前 `syncSceneOwned()` | **承重的那一半。** 没有它，碰撞体冻在建世界那一刻的位置 —— 视觉上平台动了，挡人的没动，射线也打不中它 |
-| 写回时跳过非 Dynamic | 今天只是省一次无用的往返（值原样抄回来）。它是将来给 Kinematic 接速度驱动时的防线 |
+| step 之前 `syncBodies()` | 没有它，碰撞体冻在建 body 那一刻的位置 —— 视觉上平台动了，挡人的没动，射线也打不中它 |
+| 写回时跳过非 Dynamic | **现在是承重的**：运动学体真的被求解器挪，解算结果和场景给的目标差一个残差，写回就是拿这个残差盖掉脚本刚写的权威值 |
 
-`ctest` 里 `physics_transform_ownership_smoke` 钉着这条规则，而且**用射线当探针**验「碰撞体真的
-跟着走了」—— 只断言 `TransformComponent` 的值抓不住上表第一行那种错。
+第二行从前只是「省一次无用往返」（值原样抄回来，删掉测试照样全绿）。**Kinematic 接上速度驱动
+之后不一样了** —— 它现在真的会动，所以那道判断变成了防线。这是「今天不承重、留着当将来的防线」
+那种注释兑现的一次。
 
-**已知代价**：`b3Body_SetTransform` 是**传送**，不是给速度。所以 Kinematic 体推 Dynamic 体的效果
-不对（推不动或穿透）。「电梯把箱子顶起来」那种要改成算隐含速度并 `b3Body_SetLinearVelocity`，
-那是另一件事，见 [README.md](README.md#7-明确未做)。
+`ctest` 里 `physics_transform_ownership_smoke` 钉着所有权本身，而 `physics_kinematic_smoke` 钉着
+「碰撞体真的按场景说的在动，而且推得动别人」。两个都**用射线当探针** —— 只断言
+`TransformComponent` 的值只能问「场景以为它在哪」，问不到「body 到底在哪」。
+
+##### Kinematic 是「目标 → 速度」，不是每步传送
+
+场景写进 `TransformComponent` 的值是**下一个固定步的目标**，物理用 `b3Body_SetTargetTransform`
+把它换算成线速度和角速度。旧实现是每步 `b3Body_SetTransform`（传送），而**传送不产生速度** ——
+求解器看不到「这东西正在往上走」，于是运动学体推不动 Dynamic 体：电梯托不起箱子、平台带不走人，
+要么直接穿透。
+
+三个必须记住的边角，都在 `physics_kinematic_smoke` 里钉着：
+
+- **目标停下之后没有残余速度**，不需要额外清零：对**醒着的** body，`SetTargetTransform` 每次都
+  把速度重写一遍，目标没变就是写 0。
+- 它对**睡着的** body 有一条 early-out：隐含速度低于 sleep threshold（默认 0.05 m/s）就整个返回,
+  既不唤醒也不移动。求速度的基准取的是**物理世界里当前的位置**而不是上一步的目标，所以欠的距离
+  会攒到超过阈值再一次追上（毫米级的顿走）；再加一下传送把残差补掉，慢速平台就完全跟手。
+- **目标远到一步搬不过去时退回传送**：线速度会被世界的 `maximumLinearSpeed`（默认 400 m/s）截断、
+  角速度会被 `B3_MAX_ROTATION`（每步 45°）截断，那样 body 会落在半路上，「碰撞体就在场景说的
+  地方」这条不变量当场破掉。这种量级的一步位移本来也推不动任何东西（接触来不及生成），
+  所以按传送处理 —— 和显式 `teleport()` 同一个道理：**复位不是高速运动**。
 
 两处配套的东西：`ArtiEngine/physics/tests/physics_smoke.cpp`（`ctest` 里的 `physics_smoke`）只链
 box3d、不碰引擎 —— submodule 跟 `main`，所以 `git submodule update --remote` 之后第一个报警的应该
 是它；`projects/Assets/Scenes/physics_test.artiscene` 是端到端的场景，除了三个会掉的盒子还故意
 放了三个「该被跳过」的实体（缩放过的、只有 collider 的、带父级的）。
 
-### 3.2 脚本：`Update` 唯一的消费者
+### 3.2 脚本：`Update` 唯一的消费者（外加固定步的那一路）
 
 `ArtiEngine/script/script_system.h`。Lua 5.4 + sol2（都在 `third_party/`，**pin tag** 而不是跟
-分支尖），注册在 `World` 的构造函数里 —— 和物理一样**全工程只有这一处**。
+分支尖），注册在 `World` 的构造函数里 —— 和物理一样**全工程只有那一处**。
 
 `sol::` 和 `lua_` 的类型一个都不出现在头文件里（pimpl），`artiengine_runtime` 对 `Sol2::Sol2` 是
 PRIVATE 链接，所以下游看不见它们。
 
 ```
-帧号不再单调递增？ → 整个 sol::state 拆掉重建，按当前场景每个 ScriptComponent 建一份环境
-每个有 ScriptComponent 的实体：没有实例就建（并调 on_create）→ 调 on_update(entity, dt)
-实例还在但实体没了 → 调 on_destroy，丢掉实例
+requestSessionReset() 或帧号回退？ → 整个 sol::state 拆掉重建
+每个有 ScriptComponent 的实体：没有实例就建（并调 on_create）
+  固定步（物理同步之后、解算之前） → on_fixed_update(entity, fixed_dt)
+  渲染帧（Update 阶段）            → on_update(entity, dt)
+实例还在但实体没了 → on_destroy，丢掉实例
 ```
 
-脚本约定三个**可选**的全局函数，缺哪个跳过哪个：`on_create(entity)` / `on_update(entity, dt)` /
-`on_destroy(entity)`。
+脚本约定四个**可选**的全局函数，缺哪个跳过哪个：`on_create(entity)` /
+`on_fixed_update(entity, fixed_dt)` / `on_update(entity, dt)` / `on_destroy(entity)`。
 
-六条要记住的规矩：
+**两种时钟怎么分工**（`projects/Assets/Scripts/physics_move.lua` 就是照这个写的）：
+
+| | 干什么 |
+| --- | --- |
+| `on_update` | **采输入**、算意图、写 UI 和日志。一帧一次 |
+| `on_fixed_update` | 动物理：`arti.physics.*` 施力 / 设速度、写运动学目标。一帧零到多次 |
+
+反过来都是错的。`is_key_pressed` 搬进固定回调会漏帧或者把同一次按键算好几遍（一帧里可能有零个
+固定步，也可能追帧追出好几个）；施力写在 `on_update` 里则会让效果跟着帧率变快变慢。
+
+八条要记住的规矩：
 
 - **编辑期不跑脚本，而且不需要开关。** Edit 模式根本不调 `World::tick()`（只有
-  `EditorContext::isSimulating()` 为真时才调），所以挂在 `Update` 上就自动只在 Simulate / Play 里跑。
+  `EditorContext::isSimulating()` 为真时才调），所以两种回调都自动只在 Simulate / Play 里跑。
+- **一个实例服务两种回调，禁用状态是共享的。** `ScriptSystem` 不注册成第二个 `FixedUpdate`
+  系统，而是由 `World::tick` 显式调 `onFixedUpdate` —— 注册第二个的话会多出第二个实例、第二份
+  `sol::state`，于是一个手误的脚本会「在固定时钟上被禁、在渲染时钟上继续跑」，比彻底不跑更难查。
+- **派发前先把实体身份快照下来，再逐个重新验证。** 回调里可以 `entity:destroy()` 自己、也可以删
+  别人，而那会动 EnTT 的存储 —— 边遍历 view 边执行 Lua 就是踩着自己的脚往前走。快照只存 UUID 和
+  资产 handle，组件引用一个都不跨回调保留。
 - **Lua state 不进组件、不进快照。** `ScriptComponent` 只有一个资产 handle。谁把
   `sol::environment*` 放进组件，`registerComponentCopy` 就会浅拷一份悬空指针，Stop 时炸。
-  Stop 之后场景从快照恢复，handle 回来了，而 state 会在下一次进 Play 时按重建信号重新建。
+  Stop 之后场景从快照恢复，handle 回来了，而 state 会在下一次进 Play 时按会话信号重新建。
 - **一个实体一份 `sol::environment`**（共享同一个 `sol::state`）。所以两个实体挂同名回调的脚本
   不会互相盖掉，而全局的 `arti.*` 绑定它们都看得见（environment 的 `__index` 指向全局表）。
 - **脚本抛错 = 记一条 error + 禁用那个实例**，绝不让异常穿过 `World::tick`。编辑器必须能在脚本
-  写错时继续点 Stop。禁用是按实例的，别的脚本照常跑。
+  写错时继续点 Stop。禁用是按实例的，别的脚本照常跑；两种回调一起停。
 - **只开 base / math / string / table 四个库。** 不开 `io` / `os` / `debug` / `package`，也没有
   `require` —— 脚本是数据，不该能读硬盘、起进程、加载任意模块。`lua_vm_smoke` 钉着这一条。
-- **重建信号是帧号回退**，和物理共用同一个判据（`resetClock()` 触发）。这个信号哪天变脆，
-  两处要一起改，见 3.1 末尾那条。
+- **会话信号和物理共用一套**：`World::resetClock()` 调 `requestSessionReset()`，帧号回退是兜底。
+  见 3.1 最后那条 —— 两处要一起改。
 
 `World::setAssets(AssetManager*)` 是脚本能 `load<ScriptAsset>` 的前提：编辑器每帧在 tick 之前按
 「项目开着没有」同步一次，播放器在 `AssetRuntime` 打开之后设一次。指针为空时脚本不跑，
 并 warn 一次（不是每帧）。
 
-绑定的完整清单在 [Applications.md](Applications.md#脚本能用什么) 里。示例：
-`projects/Assets/Scripts/wasd_move.lua` + `Scenes/script_test.artiscene`。
+绑定的完整清单在 [Applications.md](Applications.md#脚本能用什么) 里。两份示例，刻意演示两条不同的路：
+
+| | |
+| --- | --- |
+| `Scripts/wasd_move.lua` + `Scenes/script_test.artiscene` | 直接写 `entity.translation`，所以那个方块必须是 **Kinematic**（场景拥有 transform） |
+| `Scripts/physics_move.lua` + `Scripts/platform_lift.lua` + `Scenes/physics_move_test.artiscene` | 走 `arti.physics.*` 推一个真的 **Dynamic** 刚体：会掉、会撞、能站上升降平台。R 键显式 `teleport` 复位 |
+
+`ctest` 里 `example_assets_smoke` 编译这几份 `.lua`、读示例场景、并检查手写 `.meta` 里的 UUID
+和场景里的引用对得上 —— 示例只有人在 GUI 里才会看，最容易悄悄烂掉。
 
 ## 4. 抽取：Scene → RenderScene
 
