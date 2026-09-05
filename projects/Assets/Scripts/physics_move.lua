@@ -38,7 +38,7 @@ local function ground_under(entity)
     return nil
 end
 
-function on_create(entity)在·在·
+function on_create(entity)
     local t = entity.translation
     spawn = { x = t.x, y = t.y, z = t.z }
     arti.log.info("physics_move attached to " .. entity.name)
