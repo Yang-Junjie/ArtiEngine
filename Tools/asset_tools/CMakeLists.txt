@@ -43,6 +43,16 @@ if(BUILD_TESTING)
     add_test(NAME script_runtime_smoke COMMAND script_runtime_smoke)
     artichoco_stage_vulkan_sdk_runtime(script_runtime_smoke)
     artichoco_stage_msvc_runtime(script_runtime_smoke)
+
+    # 脚本—物理桥接的端到端：固定步回调的节奏、arti.physics.* 的绑定、以及「同一个固定步里
+    # 施力就生效」。和 script_runtime_smoke 同一个理由放在这里（要 AssetPipeline + World）。
+    add_executable(script_physics_smoke tests/script_physics_smoke.cpp)
+    target_compile_features(script_physics_smoke PRIVATE cxx_std_20)
+    target_link_libraries(script_physics_smoke PRIVATE ArtiTools::Asset ArtiChoco::Core)
+    set_target_properties(script_physics_smoke PROPERTIES FOLDER "Tests/Tools")
+    add_test(NAME script_physics_smoke COMMAND script_physics_smoke)
+    artichoco_stage_vulkan_sdk_runtime(script_physics_smoke)
+    artichoco_stage_msvc_runtime(script_physics_smoke)
 endif()
 # 运行时依赖和内建 shader 拷到 exe 旁边。
 #

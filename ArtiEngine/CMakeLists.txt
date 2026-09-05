@@ -144,6 +144,27 @@ if(BUILD_TESTING)
         FOLDER "Tests/ArtiEngine")
     add_test(NAME physics_transform_ownership_smoke COMMAND physics_transform_ownership_smoke)
     artichoco_stage_msvc_runtime(physics_transform_ownership_smoke)
+
+    # 运动学体的连续运动（目标 → 速度）、刚体控制接口、body 的增删同步。和上面那个的分工：
+    # 那个钉「谁写 transform」，这个钉「碰撞体真的按场景说的在动，而且推得动别人」。
+    add_executable(physics_kinematic_smoke physics/tests/physics_kinematic_smoke.cpp)
+    target_compile_features(physics_kinematic_smoke PRIVATE cxx_std_20)
+    target_link_libraries(physics_kinematic_smoke PRIVATE ArtiEngine::Runtime)
+    set_target_properties(physics_kinematic_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
+    add_test(NAME physics_kinematic_smoke COMMAND physics_kinematic_smoke)
+    artichoco_stage_msvc_runtime(physics_kinematic_smoke)
+
+    # 仓库里那几份示例资产（projects/Assets 下的 .lua 和示例场景）。示例只有人在 GUI 里才会看，
+    # 所以最容易悄悄烂掉 —— 语法错误、过期 UUID、给会动的平台加了缩放，三种都不会让别的测试变红。
+    # 它要 Sol2 是因为要真的编译一遍那几份 .lua（Runtime 对 Sol2 是 PRIVATE 链接）。
+    add_executable(example_assets_smoke script/tests/example_assets_smoke.cpp)
+    target_compile_features(example_assets_smoke PRIVATE cxx_std_20)
+    target_link_libraries(example_assets_smoke PRIVATE ArtiEngine::Runtime Sol2::Sol2)
+    target_compile_definitions(example_assets_smoke PRIVATE
+        ARTIENGINE_PROJECT_DIR="${CMAKE_SOURCE_DIR}/projects")
+    set_target_properties(example_assets_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
+    add_test(NAME example_assets_smoke COMMAND example_assets_smoke)
+    artichoco_stage_msvc_runtime(example_assets_smoke)
 endif()
 
 # ImGui 宿主单独一个 target：它要链 SDL 和 imgui 的 SDL3 后端，不该让核心库的下游都背上。
