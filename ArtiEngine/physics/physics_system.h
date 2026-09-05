@@ -31,6 +31,27 @@ public:
 
     void onUpdate(scene::Scene& scene, const scene::UpdateContext& context) override;
 
+    // 让物理世界和场景对齐：新实体建 body、不再合格的实体拆掉 body、Static / Kinematic 的
+    // transform 读进物理世界。
+    //
+    // **一个固定步里会调两次，两次都有各自的必要性**：
+    //
+    //   - 脚本的固定回调**之前**（`World::tick` 调）—— 会话的第一个固定步里脚本就能对刚体施力 /
+    //     设速度。没有这一次，那一步的输入会掉在地上（body 还不存在）
+    //   - `b3World_Step` **之前**（`onUpdate` 调）—— 脚本刚写进 TransformComponent 的运动学目标
+    //     必须在这一个固定步里就生效，晚一步就是可见的延迟
+    //
+    // 两次之间没有 step，所以第二次算出来的和第一次一样（幂等），区别只是把脚本的改动带上了。
+    // 因此把 PhysicsSystem 直接挂在别的地方（不经过 World）也不会漏同步，只是少一次。
+    void syncBodies(scene::Scene& scene, float fixed_delta_time);
+
+    // 新的一次模拟会话开始了：下一次同步之前把整个物理世界拆掉重建。
+    //
+    // `World::resetClock()` 调它。**光靠帧号回退当信号不够**：只跑了一帧就 Stop / Play 的话
+    // 两次的 frameIndex 都是 0，`0 < 0` 不成立，旧世界会被当成还在用的（D5）。帧号回退仍然
+    // 保留成兜底，给不经过 World 直接驱动 Scene 的调用方用。
+    void requestSessionReset() noexcept;
+
     // 从 origin 沿 translation 打一枪，返回最近命中。没有物理世界、或什么都没打中，返回 nullopt。
     //
     // translation 是位移向量，不是「方向 × 长度」的另一种写法 —— 和 Box3D 的
@@ -45,6 +66,29 @@ public:
         float fraction{ 1.0f };
     };
     std::optional<RaycastHit> raycast(const glm::vec3& origin, const glm::vec3& translation) const;
+
+    // 刚体控制（D3）。按实体 UUID 寻址 —— Box3D 的 body id 不出现在这个头里，脚本也不该
+    // 拿着一个只有物理认识的句柄。
+    //
+    // 三条失败约定，都刻意是「返回失败」而不是抛异常或断言 —— 调用方是 Lua 脚本，一个手误
+    // 不该带走进程：
+    //   - 实体没有 body（不存在、缺组件、被跳过、还没进过模拟）→ nullopt / false
+    //   - 速度 / 力 / 冲量用在非 Dynamic 上 → false。Kinematic 要动就写 TransformComponent，
+    //     那是所有权规则（见 Scene.md 3.1.1），不是这里悄悄不生效
+    //   - 非有限的输入 → false。它们会踩 Box3D 的 B3_ASSERT
+    std::optional<glm::vec3> linearVelocity(core::UUID entity) const;
+    bool setLinearVelocity(core::UUID entity, const glm::vec3& velocity);
+    bool applyForce(core::UUID entity, const glm::vec3& force);
+    bool applyImpulse(core::UUID entity, const glm::vec3& impulse);
+
+    // 显式传送：物理位置和场景位置一起改，线速度和角速度清零。
+    //
+    // 需要 Scene 是因为它要改 TransformComponent：对 Static / Kinematic 来说场景才是权威，
+    // 只挪 body 会在下一次同步时被场景的值拉回去。
+    //
+    // 「复位」和「高速运动」在物理看来完全不同 —— 用它把两者分开，别让一次复位被当成
+    // 一帧走了十米的速度。
+    bool teleport(scene::Scene& scene, core::UUID entity, const glm::vec3& position);
 
 private:
     struct Impl;
