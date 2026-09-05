@@ -1,9 +1,9 @@
 #include "runtime/world.h"
 
 #include "engine_log.h"
-#include "runtime/physics_system.h"
-#include "runtime/script_system.h"
+#include "physics/physics_system.h"
 #include "scene/component_registration.h"
+#include "script/script_system.h"
 
 #include "artichoco/scene/scene.h"
 #include "artichoco/scene/scene_serializer.h"

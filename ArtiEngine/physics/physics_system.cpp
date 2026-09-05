@@ -1,4 +1,4 @@
-#include "runtime/physics_system.h"
+#include "physics/physics_system.h"
 
 #include "engine_log.h"
 #include "scene/components.h"

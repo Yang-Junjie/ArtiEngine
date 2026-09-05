@@ -10,7 +10,7 @@
 // 这个测试**不需要脚本**：它直接在两次 tick 之间手写 TransformComponent，模拟的就是脚本
 // （或 gizmo、或将来的动画系统）会做的事。
 
-#include "runtime/physics_system.h"
+#include "physics/physics_system.h"
 #include "runtime/world.h"
 #include "scene/components.h"
 

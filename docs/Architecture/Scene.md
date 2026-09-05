@@ -122,7 +122,7 @@ Play 出来的效果」和「exe 跑出来的效果」会各自漂移，而两�
 
 ### 3.1 物理：`FixedUpdate` 唯一的消费者
 
-`ArtiEngine/runtime/physics_system.h`。Box3D（`third_party/box3d`，submodule 跟 `main`）的封装，
+`ArtiEngine/physics/physics_system.h`。Box3D（`third_party/box3d`，submodule 跟 `main`）的封装，
 注册在 `World` 的构造函数里 —— **全工程只有这一处**，所以编辑器的 Play / Simulate 和独立 player
 跑的是同一份，不会出现「编辑器里能掉、exe 里不动」。
 
@@ -189,14 +189,14 @@ body 还要几帧才停止出现在 `moveEvents` 里（一停止上报，物理�
 不对（推不动或穿透）。「电梯把箱子顶起来」那种要改成算隐含速度并 `b3Body_SetLinearVelocity`，
 那是另一件事，见 [README.md](README.md#7-明确未做)。
 
-两处配套的东西：`ArtiEngine/runtime/tests/physics_smoke.cpp`（`ctest` 里的 `physics_smoke`）只链
+两处配套的东西：`ArtiEngine/physics/tests/physics_smoke.cpp`（`ctest` 里的 `physics_smoke`）只链
 box3d、不碰引擎 —— submodule 跟 `main`，所以 `git submodule update --remote` 之后第一个报警的应该
 是它；`projects/Assets/Scenes/physics_test.artiscene` 是端到端的场景，除了三个会掉的盒子还故意
 放了三个「该被跳过」的实体（缩放过的、只有 collider 的、带父级的）。
 
 ### 3.2 脚本：`Update` 唯一的消费者
 
-`ArtiEngine/runtime/script_system.h`。Lua 5.4 + sol2（都在 `third_party/`，**pin tag** 而不是跟
+`ArtiEngine/script/script_system.h`。Lua 5.4 + sol2（都在 `third_party/`，**pin tag** 而不是跟
 分支尖），注册在 `World` 的构造函数里 —— 和物理一样**全工程只有这一处**。
 
 `sol::` 和 `lua_` 的类型一个都不出现在头文件里（pimpl），`artiengine_runtime` 对 `Sol2::Sol2` 是

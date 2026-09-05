@@ -1,9 +1,9 @@
-#include "runtime/detail/script_bindings.h"
+#include "script/detail/script_bindings.h"
 
 #include "asset/prefab_asset.h"
 #include "asset/script_asset.h"
 #include "engine_log.h"
-#include "runtime/physics_system.h"
+#include "physics/physics_system.h"
 #include "scene/components.h"
 #include "scene/prefab_instantiation.h"
 

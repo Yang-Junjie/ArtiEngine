@@ -55,13 +55,18 @@ set_target_properties(artiengine PROPERTIES FOLDER "ArtiEngine")
 # 和 Engine 分开而不是并进去：Engine 是引擎的数据模型（资产、组件、抽取），Runtime 是驱动它
 # 的循环。两者外部依赖完全一样，分开纯粹是为了让分层在链接关系上看得见 —— 以后 Runtime 要加
 # 依赖（脚本 VM、物理）不必让所有消费 Engine 数据类型的目标跟着背。
+#
+# 源码分三个目录（`runtime/` `physics/` `script/`）但**只有一个 target**：物理和脚本各自
+# 独立成库看着更干净，实际什么也换不来 —— World 的构造函数里硬注册了 PhysicsSystem 和
+# ScriptSystem，任何拿到 World 的下游都会连带链上两者；两个物理测试也都要建 World，
+# 拆了也没法只链更轻的一半。目录分开是为了读代码时找得到，不是为了链接边界。
 add_library(artiengine_runtime STATIC
+    physics/physics_system.cpp
     runtime/asset_runtime.cpp
-    runtime/detail/script_bindings.cpp
-    runtime/physics_system.cpp
     runtime/scene_renderer.cpp
-    runtime/script_system.cpp
     runtime/world.cpp
+    script/detail/script_bindings.cpp
+    script/script_system.cpp
 )
 add_library(ArtiEngine::Runtime ALIAS artiengine_runtime)
 
@@ -76,7 +81,7 @@ target_link_libraries(artiengine_runtime
         # PRIVATE：b3* 的类型只出现在 physics_system.cpp 里，公开头一个都没有（见那个头的注释）。
         # 下游因此只是跟着链上这个静态库，不会看见 box3d 的头。
         box3d
-        # 同理：sol:: / lua_ 只出现在 script_system.cpp 和 detail/script_bindings.* 里。
+        # 同理：sol:: / lua_ 只出现在 script/ 那个目录里（script_system.cpp 和 detail/script_bindings.*）。
         Sol2::Sol2
 )
 
@@ -86,7 +91,7 @@ if(BUILD_TESTING)
     # 只链 box3d，不链 artiengine_runtime：这个测试的意义就是在碰引擎之前先确认库本身是通的，
     # 后面物理出问题就不用怀疑到这一层。它也是 submodule 跟 main 的对冲 —— `git submodule
     # update --remote` 之后第一个报警的应该是它。
-    add_executable(physics_smoke runtime/tests/physics_smoke.cpp)
+    add_executable(physics_smoke physics/tests/physics_smoke.cpp)
     target_compile_features(physics_smoke PRIVATE cxx_std_20)
     target_link_libraries(physics_smoke PRIVATE box3d)
     set_target_properties(physics_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
@@ -115,14 +120,14 @@ if(BUILD_TESTING)
 
     # Lua VM 的冒烟。和 physics_smoke 同一个套路：**不链引擎**，只链 sol2（它 PUBLIC 带上 lua）。
     # 所以脚本层出问题时，这一层是不是通的不用再怀疑。它也是 lua submodule 换版本的对冲。
-    add_executable(lua_vm_smoke runtime/tests/lua_vm_smoke.cpp)
+    add_executable(lua_vm_smoke script/tests/lua_vm_smoke.cpp)
     target_compile_features(lua_vm_smoke PRIVATE cxx_std_20)
     target_link_libraries(lua_vm_smoke PRIVATE Sol2::Sol2)
     set_target_properties(lua_vm_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
     add_test(NAME lua_vm_smoke COMMAND lua_vm_smoke)
     artichoco_stage_msvc_runtime(lua_vm_smoke)
 
-    add_executable(physics_raycast_smoke runtime/tests/physics_raycast_smoke.cpp)
+    add_executable(physics_raycast_smoke physics/tests/physics_raycast_smoke.cpp)
     target_compile_features(physics_raycast_smoke PRIVATE cxx_std_20)
     target_link_libraries(physics_raycast_smoke PRIVATE ArtiEngine::Runtime)
     set_target_properties(physics_raycast_smoke PROPERTIES FOLDER "Tests/ArtiEngine")
@@ -132,7 +137,7 @@ if(BUILD_TESTING)
     # transform 所有权：Dynamic 归物理，Static / Kinematic 归场景。这条错了不会崩，
     # 症状是「按住键物体先卡一下才动」—— 从现象反推很远，所以钉在这里。
     add_executable(physics_transform_ownership_smoke
-        runtime/tests/physics_transform_ownership_smoke.cpp)
+        physics/tests/physics_transform_ownership_smoke.cpp)
     target_compile_features(physics_transform_ownership_smoke PRIVATE cxx_std_20)
     target_link_libraries(physics_transform_ownership_smoke PRIVATE ArtiEngine::Runtime)
     set_target_properties(physics_transform_ownership_smoke PROPERTIES

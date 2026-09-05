@@ -4,7 +4,7 @@
 // 和 physics_smoke 的分工：那个只链 box3d、钉住库本身的 API；这个链 Runtime，钉住
 // PhysicsSystem::raycast 把 b3* 翻成引擎类型（UUID / glm）这一层。Lua 绑定吃的就是这个。
 
-#include "runtime/physics_system.h"
+#include "physics/physics_system.h"
 #include "runtime/world.h"
 #include "scene/components.h"
 

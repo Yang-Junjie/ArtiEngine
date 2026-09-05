@@ -1,9 +1,9 @@
-#include "runtime/script_system.h"
+#include "script/script_system.h"
 
 #include "asset/script_asset.h"
 #include "engine_log.h"
-#include "runtime/detail/script_bindings.h"
 #include "scene/components.h"
+#include "script/detail/script_bindings.h"
 
 #include "artichoco/asset/asset_manager.h"
 #include "artichoco/core/uuid.h"

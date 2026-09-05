@@ -154,6 +154,8 @@ ArtiEngine/          引擎层源码
   asset/               资产类型、importer、loader、GPU 缓存、builtin
   scene/               游戏组件、序列化、RenderScene 抽取
   runtime/             World / AssetRuntime / SceneRenderer
+  physics/             PhysicsSystem（Box3D 封装）
+  script/              ScriptSystem + Lua 绑定
   imgui/               ImGuiHost
 Runtime/player/      独立播放器
 Tools/               编辑器、CLI、工具专用平台代码、UI 资源（字体）
