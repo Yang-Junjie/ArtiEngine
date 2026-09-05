@@ -1,0 +1,22 @@
+Version: 2
+Source:
+  Path: Scripts/platform_lift.lua
+  ContentHash: 0
+  Size: 1144
+Importer:
+  Name: artiengine.ScriptImporter
+  Version: 1
+Settings:
+  Authored:
+    {}
+  Inferred:
+    {}
+  ResolvedHash: 14695981039346656037
+Assets:
+  - LocalId: ""
+    Handle: 5c81970000000003
+    Type: artiengine.asset.script
+    ArtifactPath: Imported/5c81970000000003.artiscript
+    Properties:
+      byte_size: !arti/uint 1144
+    Dependencies: []
