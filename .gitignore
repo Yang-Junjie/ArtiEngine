@@ -1,3 +1,5 @@
 build/
 build-release/
+build-msvc/
+build-msvc-release/
 projects/Library/

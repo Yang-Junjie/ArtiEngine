@@ -9,20 +9,43 @@
     {
       "name": "base",
       "hidden": true,
+      "description": "Shared by both toolchains. binaryDir is deliberately absent here and supplied by each concrete preset instead: the four build trees must never overlap, or clangd will suddenly be reading a compile_commands.json produced by the other compiler.",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "ARTIENGINE_BUILD_SAMPLES": "ON"
       }
     },
     {
+      "name": "clang-base",
+      "hidden": true,
+      "description": "Note these are unqualified clang / clang++, resolved from PATH. If another LLVM is installed (C:/LLVM, say), whichever comes first on PATH wins, and one that is too old hits STL1000 against a recent MSVC STL. To pin it, replace these two with absolute paths right here.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "msvc-base",
+      "hidden": true,
+      "description": "CFLAGS / CXXFLAGS go through the environment rather than CMAKE_CXX_FLAGS: CMake splices those in front of the platform defaults (/DWIN32 /D_WINDOWS /EHsc), whereas setting the cache variable directly would displace them. Neither switch is a matter of taste. artichoco/core/log.h uses the C++20 __VA_OPT__, which MSVC's traditional preprocessor does not know, so without /Zc:preprocessor every ARTI_ASSERT raises C3861. And the sources are BOM-less UTF-8: without /utf-8 they are read in the ANSI codepage (936/GBK on this machine), which is not merely the stream of C4819 warnings on the Chinese comments -- UTF-8 lead bytes mis-paired as GBK double bytes desynchronize and swallow whichever ASCII character follows.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      },
+      "environment": {
+        "CFLAGS": "/utf-8 /Zc:preprocessor",
+        "CXXFLAGS": "/utf-8 /Zc:preprocessor"
+      }
+    },
+    {
       "name": "debug",
       "displayName": "Debug (Ninja + clang)",
-      "description": "默认开发配置, compile_commands.json 落在 build/ 供 clangd 使用",
-      "inherits": "base",
+      "description": "Default development configuration; compile_commands.json lands in build/ for clangd.",
+      "inherits": "clang-base",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
@@ -30,8 +53,28 @@
     {
       "name": "release",
       "displayName": "Release (Ninja + clang)",
-      "inherits": "base",
+      "inherits": "clang-base",
       "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "msvc-debug",
+      "displayName": "Debug (Ninja + MSVC)",
+      "description": "Must be run from an x64 Native Tools Command Prompt or Launch-VsDevShell.ps1: cl.exe finds its headers and libraries through INCLUDE / LIB / LIBPATH, none of which a plain shell has. It earns its keep by re-checking with MSVC's diagnostics what clang waved through, and by still building when the clang toolchain is broken.",
+      "inherits": "msvc-base",
+      "binaryDir": "${sourceDir}/build-msvc",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "msvc-release",
+      "displayName": "Release (Ninja + MSVC)",
+      "description": "Same as msvc-debug; needs a Developer Command Prompt.",
+      "inherits": "msvc-base",
+      "binaryDir": "${sourceDir}/build-msvc-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
@@ -45,6 +88,30 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "msvc-debug",
+      "configurePreset": "msvc-debug"
+    },
+    {
+      "name": "msvc-release",
+      "configurePreset": "msvc-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "msvc-debug",
+      "configurePreset": "msvc-debug",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }
