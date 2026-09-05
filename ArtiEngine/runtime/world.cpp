@@ -105,6 +105,26 @@ void World::tick(float delta_time) {
 
     m_fixed_accumulator.tick(delta_time, [this, &context](float fixed_delta) {
         context.fixedDeltaTime = fixed_delta;
+        // 一个固定步的三段顺序，**每一段的位置都是有理由的**：
+        //
+        //   1. 物理把 body 和场景对齐 —— 新实体现在就有 body，所以第 2 步能对它施力。
+        //      少了这一段，会话第一个固定步里脚本的输入会掉在地上（那时候还没有 body）。
+        //   2. 脚本的固定回调 —— 施的力、设的速度、写的运动学目标都要在第 3 步的
+        //      b3World_Step 里生效，晚一步就是可见的延迟。
+        //   3. FixedUpdate 阶段（物理再同步一次并解算）。
+        //
+        // ScriptSystem 不注册成第二个 FixedUpdate 系统，而是在这里显式调 —— 那样会多出第二个
+        // 实例和第二份 sol::state，禁用状态各跑一半（见 ScriptSystem::onFixedUpdate 的注释）。
+        //
+        // 两处都过一遍 isSystemEnabled：这两句绕开了 runSystems，不查的话
+        // setSystemEnabled<PhysicsSystem>(false) 会变成「不解算但照样建 body」这种半开状态。
+        // 它同时也是「系统在不在」的检查（没注册就返回 false）。
+        if (m_scene->isSystemEnabled<PhysicsSystem>()) {
+            m_scene->getSystem<PhysicsSystem>().syncBodies(*m_scene, fixed_delta);
+        }
+        if (m_scene->isSystemEnabled<ScriptSystem>()) {
+            m_scene->getSystem<ScriptSystem>().onFixedUpdate(*m_scene, context);
+        }
         m_scene->runSystems(scene::SystemStage::FixedUpdate, context);
     });
 
@@ -115,6 +135,21 @@ void World::tick(float delta_time) {
 void World::resetClock() noexcept {
     m_fixed_accumulator = core::FixedTimestepAccumulator{};
     m_frame_index = 0;
+    // 时钟归零就是一次新会话的开始，所以**显式**告诉两个有会话状态的系统，而不是让它们各自
+    // 从帧号回退里猜（D5）。只跑了一帧就 Stop / Play 的话两次帧号都是 0，`0 < 0` 不成立 ——
+    // 旧的物理世界和旧的 Lua VM 会被原样继承下来。
+    //
+    // 两个 request 都只是置一个标志（noexcept），真正的重建发生在下一次派发 / 同步之前：
+    // 这个函数在编辑器的 Stop / Play 路径上，不该在这里做分配和 lua_close。
+    //
+    // hasSystem 的判断不是形式主义：这个函数是 noexcept，而 getSystem 找不到会抛 —— 那样就是
+    // std::terminate 而不是异常。构造函数保证两个都在，但 Scene::removeSystem 是公开的。
+    if (m_scene->hasSystem<PhysicsSystem>()) {
+        m_scene->getSystem<PhysicsSystem>().requestSessionReset();
+    }
+    if (m_scene->hasSystem<ScriptSystem>()) {
+        m_scene->getSystem<ScriptSystem>().requestSessionReset();
+    }
 }
 
 } // namespace arti::engine

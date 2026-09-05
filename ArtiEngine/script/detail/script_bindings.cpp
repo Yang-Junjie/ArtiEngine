@@ -106,6 +106,57 @@ bool isKeyPressed(std::string_view name, std::unordered_set<std::string>& warned
     return core::Input::isKeyPressed(*key);
 }
 
+// 一条刚体控制调用失败了，说清楚是哪一种失败 —— 「返回 false」本身没有信息量，而这三种
+// 原因的修法完全不同。**按 (操作, 实体) 去重报一次**：脚本里这类错误是静态的（API 用错了），
+// 每帧一条会把日志刷爆，而刷爆的日志等于没有日志。
+void warnPhysicsFailure(std::unordered_set<std::string>& warned, const char* op,
+        const ScriptEntity& entity, bool requires_dynamic) {
+    if (!warned.insert(std::string{ op } + ':' + entity.id.toString()).second) {
+        return;
+    }
+
+    const std::string id = entity.id.toString();
+    const auto handle = entity.resolve();
+    if (!handle.isValid()) {
+        getLogChannel().warn("arti.physics.{}: entity {} does not exist", op, id);
+        return;
+    }
+    if (!handle.hasComponent<RigidBodyComponent>() || !handle.hasComponent<ColliderComponent>()) {
+        getLogChannel().warn(
+                "arti.physics.{}: entity {} needs both a RigidBody and a Collider to have a body",
+                op, id);
+        return;
+    }
+    if (requires_dynamic &&
+            handle.getComponent<RigidBodyComponent>().type !=
+                    RigidBodyComponent::Type::Dynamic) {
+        getLogChannel().warn("arti.physics.{}: entity {} is not a Dynamic body -- drive Static / "
+                            "Kinematic bodies by writing entity.translation instead",
+                op, id);
+        return;
+    }
+    // 组件都在、类型也对，那就是这个实体没进模拟：带父级、缩放过、或者还没跑过一个固定步。
+    getLogChannel().warn("arti.physics.{}: entity {} has no rigid body in the simulation (skipped "
+                        "because of a parent or a non-unit scale?)",
+            op, id);
+}
+
+// 三个「吃一个向量、返回成功与否」的接口共用的外壳。
+template<typename Operation>
+bool applyVector(scene::Scene& scene, std::unordered_set<std::string>& warned, const char* op,
+        const ScriptEntity& entity, const sol::table& table, Operation operation) {
+    if (!scene.hasSystem<PhysicsSystem>()) {
+        return false;
+    }
+    // 缺的分量当 0。非有限的值由 PhysicsSystem 挡下来返回 false —— 那会踩 Box3D 的断言。
+    const glm::vec3 value = tableToVec3(table, glm::vec3{ 0.0f });
+    if (operation(scene.getSystem<PhysicsSystem>(), entity.id, value)) {
+        return true;
+    }
+    warnPhysicsFailure(warned, op, entity, true);
+    return false;
+}
+
 } // namespace
 
 void bindScriptApi(sol::state& lua, scene::Scene& scene, arti::asset::AssetManager* assets,
@@ -217,6 +268,61 @@ void bindScriptApi(sol::state& lua, scene::Scene& scene, arti::asset::AssetManag
         result["fraction"] = hit->fraction;
         return result;
     });
+    // ---- 刚体控制（D3）。都按 entity 收参，不是 Box3D 的 body id ----
+    //
+    // 速度 / 力 / 冲量**只对 Dynamic 有意义**：Kinematic 要动就写 entity.translation，那是
+    // transform 所有权规则（Scene.md 3.1.1），不是这里悄悄不生效。失败返回 false 并报一次原因。
+    physics.set_function("get_linear_velocity",
+            [&lua, &scene](const ScriptEntity& entity) -> sol::object {
+                if (!scene.hasSystem<PhysicsSystem>()) {
+                    return sol::lua_nil;
+                }
+                const auto velocity =
+                        scene.getSystem<PhysicsSystem>().linearVelocity(entity.id);
+                if (!velocity) {
+                    return sol::lua_nil;
+                }
+                return vec3ToTable(lua, *velocity);
+            });
+    physics.set_function("set_linear_velocity",
+            [&scene, &warned_keys](const ScriptEntity& entity, const sol::table& velocity) {
+                return applyVector(scene, warned_keys, "set_linear_velocity", entity, velocity,
+                        [](PhysicsSystem& system, core::UUID id, const glm::vec3& value) {
+                            return system.setLinearVelocity(id, value);
+                        });
+            });
+    physics.set_function("apply_force",
+            [&scene, &warned_keys](const ScriptEntity& entity, const sol::table& force) {
+                return applyVector(scene, warned_keys, "apply_force", entity, force,
+                        [](PhysicsSystem& system, core::UUID id, const glm::vec3& value) {
+                            return system.applyForce(id, value);
+                        });
+            });
+    physics.set_function("apply_impulse",
+            [&scene, &warned_keys](const ScriptEntity& entity, const sol::table& impulse) {
+                return applyVector(scene, warned_keys, "apply_impulse", entity, impulse,
+                        [](PhysicsSystem& system, core::UUID id, const glm::vec3& value) {
+                            return system.applyImpulse(id, value);
+                        });
+            });
+    // teleport 对三种类型都成立（它同时改场景和物理），所以不筛 Dynamic。
+    physics.set_function("teleport",
+            [&scene, &warned_keys](const ScriptEntity& entity, const sol::table& position) {
+                if (!scene.hasSystem<PhysicsSystem>()) {
+                    return false;
+                }
+                const auto handle = entity.resolve();
+                const glm::vec3 fallback = handle.isValid()
+                        ? handle.getComponent<scene::TransformComponent>().translation
+                        : glm::vec3{ 0.0f };
+                // 缺的分量保持原值：teleport({ y = 3 }) 是「抬到 3 米高」，不是「挪到 x=0」。
+                const glm::vec3 target = tableToVec3(position, fallback);
+                if (scene.getSystem<PhysicsSystem>().teleport(scene, entity.id, target)) {
+                    return true;
+                }
+                warnPhysicsFailure(warned_keys, "teleport", entity, false);
+                return false;
+            });
     arti["physics"] = physics;
 
     sol::table scene_table = lua.create_table();
